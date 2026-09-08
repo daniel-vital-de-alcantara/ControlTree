@@ -1,17 +1,15 @@
-"""Placeholder tests for the ``controltree`` package."""
+"""Smoke tests for the ``controltree`` public API."""
 
-from pathlib import Path
-import sys
+import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from controltree import ControlTree, Node
+from controltree import TreeModel, start_manual_tree
 
 
-def test_public_api_placeholder() -> None:
-    """Verify that the placeholder public API imports cleanly."""
-    tree = ControlTree()
-    node = Node(name="root")
+def test_public_api_starts_a_manual_tree() -> None:
+    """Verify that the documented public workflow imports and initializes."""
+    frame = pd.DataFrame({"feature": [1, 2], "target": [0, 1]})
+    tree = start_manual_tree(frame).set_target("target", min_samples_leaf=1)
 
-    assert tree.root is None
-    assert node.name == "root"
+    assert isinstance(tree, TreeModel)
+    assert tree.target_col == "target"
+    assert len(tree.nodes[""].row_index) == 2

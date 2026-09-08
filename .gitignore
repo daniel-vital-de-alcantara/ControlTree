@@ -1,4 +1,5 @@
 __pycache__/
+.DS_Store
 *.py[cod]
 *.egg-info/
 .pytest_cache/
@@ -8,3 +9,7 @@ build/
 dist/
 docs/_build/
 AGENTS.md
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+.DS_Store

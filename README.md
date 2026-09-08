@@ -40,8 +40,9 @@ dataset and building a tree without requiring a target. Manual splits,
 distributions, metrics, presentation, and saved-tree replay work independently.
 When recommended splits are needed, an optional recommendation target is chosen
 inside the Node inspector. Categorical targets are ranked by Gini gain and
-continuous targets by variance reduction. The local FastAPI service performs
-the scoring. The Titanic demo remains available without an upload.
+continuous targets by variance reduction. Split scoring, manual branching, and
+saved-tree replay all run in the browser: uploaded rows never leave the user's
+device. The Titanic demo remains available without an upload.
 
 The Node inspector supports recommended binary splits, manual numeric or
 categorical multiway splits, and a selected-node Distribution tab. That tab
@@ -66,19 +67,12 @@ below the synchronized tree without sending source rows to the presentation
 window.
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e '.[web]'
-uvicorn controltree.api:app --app-dir src --reload
-```
-
-In a second terminal:
-
-```bash
 cd web
 npm install
 npm run dev
 ```
 
 Run its domain tests with `npm test`, or make a production bundle with
-`npm run build`.
+`npm run build`. The FastAPI module remains in the Python package as a reference
+implementation and parity-test surface, but it is not required by the hosted
+workbench.

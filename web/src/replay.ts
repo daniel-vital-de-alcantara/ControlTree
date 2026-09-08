@@ -1,84 +1,49 @@
 import type { ParsedDataset } from "./dataset";
-import type { TreeNode, TreeSplitDefinition } from "./domain";
+import { allRowIndices, materializeSplit } from "./data-engine";
+import type { TreeNode } from "./domain";
 import type { ControlTreeProject, SavedTreeNode } from "./project-file";
 
-type ApiNode = {
-  id: string;
-  title: string;
-  samples: number;
-  branch_label?: string;
-  row_indices: number[];
-  split?: {
-    kind: "binary" | "manual";
-    feature: string;
-    operator?: "<=" | "==";
-    value?: string | number | boolean;
-    values?: Array<string | number | boolean>;
-    force_categorical?: boolean;
-    include_other?: boolean;
+function materializeNode(
+  dataset: ParsedDataset,
+  saved: SavedTreeNode,
+  rowIndices: number[],
+  id: string,
+  title: string,
+  branchLabel?: string,
+): TreeNode {
+  const node: TreeNode = {
+    id,
+    title,
+    samples: rowIndices.length,
+    ...(branchLabel ? { branchLabel } : {}),
+    rowIndices,
+    ...(saved.split ? { split: saved.split } : {}),
+    children: [],
   };
-  children: ApiNode[];
-};
-
-function requestNode(node: SavedTreeNode): object {
-  const split = node.split?.kind === "manual"
-    ? {
-        kind: node.split.kind,
-        feature: node.split.feature,
-        values: node.split.values,
-        force_categorical: node.split.forceCategorical,
-        include_other: node.split.includeOther,
-      }
-    : node.split;
-  return { ...(split ? { split } : {}), children: node.children.map(requestNode) };
-}
-
-function splitDefinition(split: NonNullable<ApiNode["split"]>): TreeSplitDefinition {
-  if (split.kind === "binary") {
-    return {
-      kind: "binary",
-      feature: split.feature,
-      operator: split.operator ?? "==",
-      value: split.value ?? "",
-    };
+  if (!saved.split) return node;
+  const branches = materializeSplit(dataset, rowIndices, saved.split);
+  if (branches.length !== saved.children.length || branches.some((branch) => branch.rowIndices.length === 0)) {
+    throw new Error(
+      `The saved split on '${saved.split.feature}' does not produce the same branches with this dataset. ` +
+      "Check that this is a compatible data version.",
+    );
   }
-  return {
-    kind: "manual",
-    feature: split.feature,
-    values: split.values ?? [],
-    forceCategorical: split.force_categorical ?? false,
-    includeOther: split.include_other ?? true,
-  };
-}
-
-function treeNode(node: ApiNode): TreeNode {
-  return {
-    id: node.id,
-    title: node.title,
-    samples: node.samples,
-    branchLabel: node.branch_label,
-    rowIndices: node.row_indices,
-    ...(node.split ? { split: splitDefinition(node.split) } : {}),
-    children: node.children.map(treeNode),
-  };
+  node.children = branches.map((branch, index) => materializeNode(
+    dataset,
+    saved.children[index],
+    branch.rowIndices,
+    `${id}.${index + 1}`,
+    saved.split?.kind === "binary"
+      ? index === 0 ? "Matching rows" : "Remaining rows"
+      : `Branch ${index + 1}`,
+    branch.label,
+  ));
+  return node;
 }
 
 export async function replayProject(
   dataset: ParsedDataset,
   project: ControlTreeProject,
 ): Promise<TreeNode> {
-  const response = await fetch("/api/replay-tree", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      columns: dataset.columns,
-      rows: dataset.rows,
-      tree: requestNode(project.tree),
-    }),
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { detail?: string } | null;
-    throw new Error(payload?.detail ?? "The saved tree could not be applied to this dataset.");
-  }
-  return treeNode(await response.json() as ApiNode);
+  return materializeNode(dataset, project.tree, allRowIndices(dataset), "root", "All rows");
 }

@@ -82,7 +82,7 @@ export function DataSetup({ onContinue, onResume, onUseDemo }: Props) {
       <section className="setup-intro">
         <p className="kicker">New decision tree</p>
         <h1>Start with your data.</h1>
-        <p>Choose a CSV or Excel workbook. Your data is processed locally on this computer.</p>
+        <p>Choose a CSV or Excel workbook. Your data stays in this browser and is never uploaded.</p>
       </section>
 
       <section className="setup-card" aria-label="Dataset setup">

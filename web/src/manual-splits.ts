@@ -1,14 +1,6 @@
 import type { ParsedDataset } from "./dataset";
+import { materializeManualBranches } from "./data-engine";
 import type { ManualSplitResult } from "./domain";
-
-type ApiManualSplit = {
-  feature: string;
-  branches: Array<{
-    label: string;
-    count: number;
-    row_indices: number[];
-  }>;
-};
 
 export async function requestManualSplit(
   dataset: ParsedDataset,
@@ -18,28 +10,16 @@ export async function requestManualSplit(
   forceCategorical: boolean,
   includeOther: boolean,
 ): Promise<ManualSplitResult> {
-  const response = await fetch("/api/manual-split", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      columns: dataset.columns,
-      rows: dataset.rows,
-      row_indices: rowIndices,
-      feature,
-      values,
-      force_categorical: forceCategorical,
-      include_other: includeOther,
-    }),
-  });
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { detail?: string } | null;
-    throw new Error(payload?.detail ?? "The manual split could not be applied.");
-  }
-
-  const result = await response.json() as ApiManualSplit;
+  const branches = materializeManualBranches(
+    dataset,
+    rowIndices,
+    feature,
+    values,
+    forceCategorical,
+    includeOther,
+  );
   return {
-    feature: result.feature,
+    feature,
     definition: {
       kind: "manual",
       feature,
@@ -47,10 +27,10 @@ export async function requestManualSplit(
       forceCategorical,
       includeOther,
     },
-    branches: result.branches.map((branch) => ({
+    branches: branches.map((branch) => ({
       label: branch.label,
-      count: branch.count,
-      rowIndices: branch.row_indices,
+      count: branch.rowIndices.length,
+      rowIndices: branch.rowIndices,
     })),
   };
 }

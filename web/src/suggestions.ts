@@ -1,18 +1,31 @@
-import type { ParsedDataset } from "./dataset";
+import type { DataValue, ParsedDataset } from "./dataset";
+import { asNumber, columnPosition, frequencyValues, isMissing, isNumericColumn, observedRowIndices, splitRows } from "./data-engine";
 import type { SplitCandidate } from "./domain";
 
-type ApiSuggestion = {
-  id: string;
-  feature: string;
-  operator: "<=" | "==";
-  value: number | string | boolean;
-  gain: number;
-  criterion: string;
-  left_count: number;
-  right_count: number;
-  left_row_indices: number[];
-  right_row_indices: number[];
-};
+function quantile(sorted: number[], probability: number): number {
+  const position = (sorted.length - 1) * probability;
+  const lower = Math.floor(position);
+  const fraction = position - lower;
+  return sorted[lower] + ((sorted[lower + 1] ?? sorted[lower]) - sorted[lower]) * fraction;
+}
+
+function variance(values: number[]): number {
+  if (values.length === 0) return 0;
+  const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return values.reduce((sum, value) => sum + ((value - average) ** 2), 0) / values.length;
+}
+
+function categoryKey(value: unknown): string {
+  return `${typeof value}:${String(value)}`;
+}
+
+function gini(values: Array<DataValue | undefined>): number {
+  const observed = values.filter((value) => !isMissing(value));
+  if (observed.length === 0) return 0;
+  const counts = new Map<string, number>();
+  observed.forEach((value) => counts.set(categoryKey(value), (counts.get(categoryKey(value)) ?? 0) + 1));
+  return 1 - [...counts.values()].reduce((sum, count) => sum + ((count / observed.length) ** 2), 0);
+}
 
 export async function fetchSplitSuggestions(
   dataset: ParsedDataset,
@@ -20,34 +33,69 @@ export async function fetchSplitSuggestions(
   rowIndices?: number[],
   signal?: AbortSignal,
 ): Promise<SplitCandidate[]> {
-  const response = await fetch("/api/suggestions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      columns: dataset.columns,
-      rows: dataset.rows,
-      target,
-      row_indices: rowIndices,
-    }),
-    signal,
-  });
+  if (signal?.aborted) throw new DOMException("The calculation was cancelled.", "AbortError");
+  const indices = observedRowIndices(dataset, rowIndices);
+  if (indices.length < 2) return [];
+  const targetPosition = columnPosition(dataset, target);
+  const targetValues = indices.map((rowIndex) => dataset.rows[rowIndex]?.[targetPosition]);
+  const distinctTargetValues = new Set(targetValues.filter((value) => !isMissing(value)).map(categoryKey));
+  const regression = isNumericColumn(dataset, target, indices) && distinctTargetValues.size > 20;
+  const minSamplesLeaf = Math.min(20, Math.max(1, Math.floor(indices.length / 10)));
+  const parentNumeric = targetValues.map(asNumber).filter((value): value is number => value !== null);
+  const parentScore = regression ? variance(parentNumeric) : gini(targetValues);
+  const candidates: Array<Omit<SplitCandidate, "id">> = [];
 
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { detail?: string } | null;
-    throw new Error(payload?.detail ?? "The split service could not analyze this dataset.");
+  for (const feature of dataset.columns.filter((column) => column !== target)) {
+    const featurePosition = columnPosition(dataset, feature);
+    const featureValues = indices.map((rowIndex) => dataset.rows[rowIndex]?.[featurePosition]);
+    const numeric = isNumericColumn(dataset, feature, indices);
+    let candidateValues: Array<string | number | boolean>;
+    if (numeric) {
+      const sorted = featureValues
+        .map(asNumber)
+        .filter((value): value is number => value !== null)
+        .sort((a, b) => a - b);
+      candidateValues = [...new Set(Array.from(
+        { length: 20 },
+        (_, index) => quantile(sorted, 0.05 + (index * 0.9 / 19)),
+      ))];
+    } else {
+      candidateValues = frequencyValues(featureValues);
+    }
+
+    for (const value of candidateValues) {
+      const operator = numeric ? "<=" as const : "==" as const;
+      const [leftRowIndices, rightRowIndices] = splitRows(dataset, indices, feature, operator, value);
+      if (leftRowIndices.length < minSamplesLeaf || rightRowIndices.length < minSamplesLeaf) continue;
+      const targetNumbers = (branch: number[]) => branch
+        .map((rowIndex) => asNumber(dataset.rows[rowIndex]?.[targetPosition]))
+        .filter((item): item is number => item !== null);
+      const targetCategories = (branch: number[]) => branch.map((rowIndex) => dataset.rows[rowIndex]?.[targetPosition]);
+      const leftNumbers = regression ? targetNumbers(leftRowIndices) : [];
+      const rightNumbers = regression ? targetNumbers(rightRowIndices) : [];
+      const weighted = regression
+        ? (leftNumbers.length / parentNumeric.length) * variance(leftNumbers)
+          + (rightNumbers.length / parentNumeric.length) * variance(rightNumbers)
+        : (leftRowIndices.length / indices.length) * gini(targetCategories(leftRowIndices))
+          + (rightRowIndices.length / indices.length) * gini(targetCategories(rightRowIndices));
+      candidates.push({
+        feature,
+        operator,
+        value,
+        gain: parentScore - weighted,
+        criterion: regression ? "Variance reduction" : "Gini gain",
+        leftCount: leftRowIndices.length,
+        rightCount: rightRowIndices.length,
+        leftRowIndices,
+        rightRowIndices,
+      });
+    }
   }
 
-  const suggestions = await response.json() as ApiSuggestion[];
-  return suggestions.map((suggestion) => ({
-    id: suggestion.id,
-    feature: suggestion.feature,
-    operator: suggestion.operator,
-    value: suggestion.value,
-    gain: suggestion.gain,
-    criterion: suggestion.criterion,
-    leftCount: suggestion.left_count,
-    rightCount: suggestion.right_count,
-    leftRowIndices: suggestion.left_row_indices,
-    rightRowIndices: suggestion.right_row_indices,
+  candidates.sort((left, right) => right.gain - left.gain);
+  if (signal?.aborted) throw new DOMException("The calculation was cancelled.", "AbortError");
+  return candidates.slice(0, 8).map((candidate, index) => ({
+    ...candidate,
+    id: `${candidate.feature}-${index + 1}`,
   }));
 }

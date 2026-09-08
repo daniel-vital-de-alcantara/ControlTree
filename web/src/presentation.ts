@@ -31,7 +31,14 @@ export function publishPresentation(state: PresentationState): void {
   channel.close();
 }
 
+export function presenterUrl(currentUrl: string): string {
+  const url = new URL(currentUrl);
+  url.searchParams.set("view", "present");
+  url.hash = "";
+  return url.toString();
+}
+
 export function openPresentationWindow(state: PresentationState): void {
   publishPresentation(state);
-  window.open("/present", "controltree-presentation", "popup=yes,width=1400,height=900");
+  window.open(presenterUrl(window.location.href), "controltree-presentation", "popup=yes,width=1400,height=900");
 }

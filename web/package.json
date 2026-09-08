@@ -1,10 +1,14 @@
 {
   "name": "controltree-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "Private, intentional decision-tree workbench",
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "desktop": "npm run build && electron .",
+    "desktop:dist": "npm run build && electron-builder --win nsis portable",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
     "build": "npm run typecheck && vite build",
     "test": "vitest run"
@@ -22,6 +26,47 @@
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19.0.3",
     "@types/react-dom": "^19.0.2",
-    "vitest": "^2.1.8"
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
+    "vitest": "^5.0.0"
+  },
+  "build": {
+    "appId": "com.controltree.workbench",
+    "productName": "ControlTree",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "ControlTree-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "ControlTree-Portable-${version}-${arch}.${ext}"
+    }
   }
 }

@@ -7,6 +7,6 @@ import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {window.location.pathname === "/present" ? <PresentationView /> : <App />}
+    {new URLSearchParams(window.location.search).get("view") === "present" ? <PresentationView /> : <App />}
   </StrictMode>,
 );

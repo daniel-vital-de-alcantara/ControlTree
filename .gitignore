@@ -11,5 +11,6 @@ docs/_build/
 AGENTS.md
 web/node_modules/
 web/dist/
+web/release/
 web/*.tsbuildinfo
 .DS_Store

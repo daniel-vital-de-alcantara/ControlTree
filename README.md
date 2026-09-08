@@ -76,3 +76,12 @@ Run its domain tests with `npm test`, or make a production bundle with
 `npm run build`. The FastAPI module remains in the Python package as a reference
 implementation and parity-test surface, but it is not required by the hosted
 workbench.
+
+## Windows desktop preview
+
+Tagged releases are built on GitHub's Windows runners and published under
+GitHub Releases as both a conventional installer and a portable executable.
+Both packages contain the React interface and private browser calculation
+engine, so end users do not need Node.js or Python and dataset rows remain on
+their computer. The Python engine remains available for future desktop-only
+advanced analysis.

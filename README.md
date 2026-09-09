@@ -13,7 +13,31 @@
 - `src/controltree/rendering.py`: tree rendering and visualization support.
 - `src/controltree/workflow.py`: higher-level orchestration utilities.
 
-## Installation
+## Installation / Running Control Tree
+
+For Windows users, each [GitHub Release](https://github.com/daniel-vital-de-alcantara/ControlTree/releases)
+provides two ways to run the browser workbench:
+
+- **ControlTree Setup or Portable EXE** is the normal option. It contains
+  everything required and does not need Python, Node.js, or other development
+  tools.
+- **ControlTree Python ZIP** is the fallback for protected corporate machines
+  that allow Python scripts but block packaged applications. Extract the whole
+  ZIP and double-click `START_CONTROLTREE.bat`. It requires Python 3.10 or
+  newer, but it does not need Node.js, npm, Git, administrator access, `pip`, or
+  an internet connection after download. The included Python launcher serves
+  the pre-built React interface only to the local computer and opens it in the
+  default browser.
+
+The Python ZIP deliberately uses only Python's standard library. ControlTree's
+current data processing runs in the included browser interface, so creating a
+virtual environment or downloading dependencies would add failure points
+without adding functionality. In both distributions, dataset rows remain on
+the user's computer.
+
+### Python library development
+
+For Python library development rather than running the workbench:
 
 ```bash
 pip install .
@@ -80,8 +104,10 @@ workbench.
 ## Windows desktop preview
 
 Tagged releases are built on GitHub's Windows runners and published under
-GitHub Releases as both a conventional installer and a portable executable.
-Both packages contain the React interface and private browser calculation
-engine, so end users do not need Node.js or Python and dataset rows remain on
-their computer. The Python engine remains available for future desktop-only
-advanced analysis.
+GitHub Releases as a conventional installer, a portable executable, a portable
+EXE ZIP, and a Python fallback ZIP. All distributions contain the same React
+interface and private browser calculation engine, and dataset rows remain on
+the user's computer. The packaged desktop options need neither Node.js nor
+Python. The Python fallback needs Python 3.10 or newer but no third-party
+packages. The full Python analysis engine remains available for future
+desktop-only advanced analysis.

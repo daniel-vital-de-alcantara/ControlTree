@@ -30,6 +30,23 @@ jobs:
         run: npm test
       - name: Build Windows installer and portable app
         run: npm run desktop:dist
+      - name: Package Python fallback
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          if (-not $version) {
+            $version = (Get-Content package.json | ConvertFrom-Json).version
+          }
+
+          $bundle = Join-Path $PWD "release/ControlTree-Python"
+          New-Item -ItemType Directory -Force -Path $bundle | Out-Null
+          Copy-Item ../portable_python/START_CONTROLTREE.bat $bundle
+          Copy-Item ../portable_python/controltree_server.py $bundle
+          Copy-Item ../portable_python/README.txt $bundle
+          Copy-Item dist (Join-Path $bundle "app") -Recurse
+
+          $zipPath = Join-Path $PWD "release/ControlTree-Python-$version.zip"
+          Compress-Archive -Path $bundle -DestinationPath $zipPath -CompressionLevel Optimal
       - name: Package portable ZIP and checksums
         shell: pwsh
         run: |
@@ -56,6 +73,7 @@ jobs:
             - **Setup** installs ControlTree and adds normal Windows shortcuts.
             - **Portable EXE** runs without installation after download.
             - **Portable ZIP** contains the same portable app and may be easier to download through restrictive browsers.
+            - **Python ZIP** is an offline fallback for restricted Windows machines where Python 3.10+ is available but packaged apps are blocked.
             - Dataset rows stay on the computer and are processed locally.
 
             Windows may show an “Unknown publisher” warning because this preview is not yet code-signed.

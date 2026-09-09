@@ -7,26 +7,46 @@ echo ============================================================
 echo  ControlTree - Python launcher
 echo ============================================================
 echo.
-echo Checking for Python 3.10 or newer...
+echo Checking for Python...
 
-set "CONTROLTREE_PYTHON="
+set "CONTROLTREE_PYTHON_EXE="
+set "CONTROLTREE_PYTHON_ARGS="
 where py >nul 2>&1
 if not errorlevel 1 (
-    py -3 -c "import sys; raise SystemExit(0 if sys.version_info ^>= (3, 10) else 1)" >nul 2>&1
-    if not errorlevel 1 set "CONTROLTREE_PYTHON=py -3"
-)
-
-if not defined CONTROLTREE_PYTHON (
-    where python >nul 2>&1
+    py -3 -c "import sys" >nul 2>&1
     if not errorlevel 1 (
-        python -c "import sys; raise SystemExit(0 if sys.version_info ^>= (3, 10) else 1)" >nul 2>&1
-        if not errorlevel 1 set "CONTROLTREE_PYTHON=python"
+        set "CONTROLTREE_PYTHON_EXE=py"
+        set "CONTROLTREE_PYTHON_ARGS=-3"
     )
 )
 
-if not defined CONTROLTREE_PYTHON goto :python_missing
+if not defined CONTROLTREE_PYTHON_EXE (
+    where py >nul 2>&1
+    if not errorlevel 1 (
+        py -c "import sys" >nul 2>&1
+        if not errorlevel 1 set "CONTROLTREE_PYTHON_EXE=py"
+    )
+)
 
-for /f "delims=" %%V in ('%CONTROLTREE_PYTHON% -c "import sys; print(sys.version.split()[0])"') do set "CONTROLTREE_PYTHON_VERSION=%%V"
+if not defined CONTROLTREE_PYTHON_EXE (
+    where python >nul 2>&1
+    if not errorlevel 1 (
+        python -c "import sys" >nul 2>&1
+        if not errorlevel 1 set "CONTROLTREE_PYTHON_EXE=python"
+    )
+)
+
+if not defined CONTROLTREE_PYTHON_EXE (
+    where python3 >nul 2>&1
+    if not errorlevel 1 (
+        python3 -c "import sys" >nul 2>&1
+        if not errorlevel 1 set "CONTROLTREE_PYTHON_EXE=python3"
+    )
+)
+
+if not defined CONTROLTREE_PYTHON_EXE goto :python_missing
+
+for /f "delims=" %%V in ('%CONTROLTREE_PYTHON_EXE% %CONTROLTREE_PYTHON_ARGS% -c "import sys; print(sys.version.split()[0])"') do set "CONTROLTREE_PYTHON_VERSION=%%V"
 echo Found Python %CONTROLTREE_PYTHON_VERSION%.
 echo No packages, administrator access, or internet connection are required.
 echo.
@@ -34,7 +54,7 @@ echo Starting ControlTree...
 echo Your browser should open automatically in a few seconds.
 echo.
 
-%CONTROLTREE_PYTHON% "%~dp0controltree_server.py"
+%CONTROLTREE_PYTHON_EXE% %CONTROLTREE_PYTHON_ARGS% "%~dp0controltree_server.py"
 set "CONTROLTREE_EXIT=%ERRORLEVEL%"
 
 if not "%CONTROLTREE_EXIT%"=="0" (

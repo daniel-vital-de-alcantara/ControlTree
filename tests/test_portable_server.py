@@ -37,3 +37,13 @@ def test_portable_server_serves_frontend_and_health(tmp_path: Path) -> None:
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
+
+
+def test_windows_launcher_checks_common_python_commands() -> None:
+    launcher = (SERVER_PATH.parent / "START_CONTROLTREE.bat").read_text(encoding="utf-8")
+
+    assert 'py -3 -c "import sys"' in launcher
+    assert 'py -c "import sys"' in launcher
+    assert 'python -c "import sys"' in launcher
+    assert 'python3 -c "import sys"' in launcher
+    assert "^>=" not in launcher

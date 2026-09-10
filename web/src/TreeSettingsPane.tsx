@@ -21,10 +21,21 @@ type Props = {
   onNodeFieldsChange: (fields: NodeFieldVisibility) => void;
   onMetricsChange: (metrics: SummaryMetric[]) => void;
   onNodeTitleChange: (title: string) => void;
+  onNodeTitleCommit?: (title: string) => void;
+  nodeNameSuggestions?: string[];
+  renameRequestId?: number;
   onVariableTypeChange: (variable: string, type: VariableType) => void;
 };
 
-export function TreeSettingsPane({ section, dataset, appearance, nodeFields, metrics, selectedNode, onAppearanceChange, onNodeFieldsChange, onMetricsChange, onNodeTitleChange, onVariableTypeChange }: Props) {
+export function TreeSettingsPane({ section, dataset, appearance, nodeFields, metrics, selectedNode, onAppearanceChange, onNodeFieldsChange, onMetricsChange, onNodeTitleChange, onNodeTitleCommit, nodeNameSuggestions = [], renameRequestId = 0, onVariableTypeChange }: Props) {
+  const nodeNameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!renameRequestId || section !== "metrics" || !selectedNode) return;
+    nodeNameInputRef.current?.focus();
+    nodeNameInputRef.current?.select();
+  }, [renameRequestId, section, selectedNode?.id]);
+
   function updateMetric(id: string, patch: Partial<SummaryMetric>) {
     onMetricsChange(metrics.map((metric) => metric.id === id ? { ...metric, ...patch } : metric));
   }
@@ -134,12 +145,25 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
           {selectedNode ? (
             <>
               <input
+                ref={nodeNameInputRef}
                 className="text-input"
                 id="selected-node-name"
+                list="recent-node-names"
                 value={selectedNode.title}
                 onChange={(event) => onNodeTitleChange(event.target.value)}
-                onBlur={(event) => { if (!event.target.value.trim()) onNodeTitleChange("Untitled node"); }}
+                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+                onBlur={(event) => {
+                  const title = event.target.value.trim();
+                  if (!title) onNodeTitleChange("Untitled node");
+                  else {
+                    if (title !== event.target.value) onNodeTitleChange(title);
+                    onNodeTitleCommit?.(title);
+                  }
+                }}
               />
+              <datalist id="recent-node-names">
+                {nodeNameSuggestions.map((name) => <option value={name} key={name} />)}
+              </datalist>
               <small>Click another node on the canvas to rename it without leaving Metrics.</small>
             </>
           ) : (
@@ -150,7 +174,6 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
           {([
             ["nodeName", "Node ID"],
             ["nodeTitle", "Node name"],
-            ["rowCount", "Row count"],
           ] as const).map(([key, label]) => (
             <label className="setting-check-row" key={key}>
               <input
@@ -161,6 +184,26 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
               <span><strong>{label}</strong></span>
             </label>
           ))}
+          <div className="setting-check-row setting-check-row--with-select">
+            <label>
+              <input
+                type="checkbox"
+                checked={nodeFields.rowCount}
+                onChange={(event) => onNodeFieldsChange({ ...nodeFields, rowCount: event.target.checked })}
+              />
+              <span><strong>Row count</strong></span>
+            </label>
+            <select
+              aria-label="Row count display"
+              disabled={!nodeFields.rowCount}
+              value={nodeFields.rowCountFormat}
+              onChange={(event) => onNodeFieldsChange({ ...nodeFields, rowCountFormat: event.target.value as NodeFieldVisibility["rowCountFormat"] })}
+            >
+              <option value="count">Number of rows</option>
+              <option value="percent_root">% of root rows</option>
+              <option value="percent_parent">% of parent rows</option>
+            </select>
+          </div>
         </div>
         <div className="calculated-metrics-heading">
           <strong>Calculated metrics</strong>
@@ -171,7 +214,8 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
         {dataset && metrics.map((metric, index) => {
           const numeric = isNumericVariable(dataset, metric.variable);
           const options = allAggregations.filter((item) => numeric || item.value === "count" || item.value === "distinct" || item.value === "missing" || item.value === "mode");
-          const canShowPercentage = metric.aggregation === "average" || metric.aggregation === "sum" || metric.aggregation === "min" || metric.aggregation === "max" || metric.aggregation === "mode";
+          const canUseRelativeFormats = metric.aggregation !== "mode";
+          const canShowPercentage = ["average", "sum", "min", "max", "mode"].includes(metric.aggregation);
           return (
             <div className={`metric-editor${metric.target ? " metric-editor--target" : ""}`} key={metric.id}>
               <div className="metric-editor__heading">
@@ -181,31 +225,58 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
                   <button type="button" disabled={index === metrics.length - 1} aria-label={`Move ${metric.variable} metric down`} onClick={() => moveMetric(index, 1)}>↓</button>
                 </div>
               </div>
+              <label className="metric-label-row">
+                <span>Display name</span>
+                <input
+                  className="text-input metric-label-input"
+                  aria-label={`Display name for ${metric.variable} metric`}
+                  placeholder={`${allAggregations.find((item) => item.value === metric.aggregation)?.label} ${metric.variable}`}
+                  value={metric.label ?? ""}
+                  onChange={(event) => updateMetric(metric.id, { label: event.target.value })}
+                />
+              </label>
               <div className="metric-editor__inputs">
                 <select value={metric.variable} disabled={metric.target} aria-label={metric.target ? "Project target variable" : "Metric variable"} onChange={(event) => {
                   const variable = event.target.value;
+                  const nextNumeric = isNumericVariable(dataset, variable);
                   updateMetric(metric.id, {
                     variable,
-                    aggregation: isNumericVariable(dataset, variable) ? metric.aggregation : "mode",
+                    aggregation: nextNumeric ? metric.aggregation : "mode",
+                    ...(!nextNumeric && metric.format !== "percentage" ? { format: "number" } : {}),
                   });
                 }}>
                   {dataset.columns.map((column) => <option key={column} value={column}>{column}</option>)}
                 </select>
-                <select value={metric.aggregation} onChange={(event) => updateMetric(metric.id, { aggregation: event.target.value as SummaryMetric["aggregation"] })}>
+                <select value={metric.aggregation} onChange={(event) => {
+                  const aggregation = event.target.value as SummaryMetric["aggregation"];
+                  const percentageAllowed = ["average", "sum", "min", "max", "mode"].includes(aggregation);
+                  const relativeAllowed = aggregation !== "mode";
+                  const formatAllowed = metric.format === undefined || metric.format === "number" ||
+                    (metric.format === "percentage" && percentageAllowed) ||
+                    (metric.format !== "percentage" && relativeAllowed);
+                  updateMetric(metric.id, {
+                    aggregation,
+                    ...(!formatAllowed ? { format: "number" } : {}),
+                  });
+                }}>
                   {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </div>
+              <label className="metric-format-row">
+                <span>Display format</span>
+                <select value={metric.format ?? "number"} onChange={(event) => updateMetric(metric.id, { format: event.target.value as SummaryMetric["format"] })}>
+                  <option value="number">Standard number</option>
+                  {canUseRelativeFormats && <option value="compact">Compact (4K, 5M, 1T)</option>}
+                  {canShowPercentage && <option value="percentage">Percentage</option>}
+                  {canUseRelativeFormats && <option value="percent_root">% of root node</option>}
+                  {canUseRelativeFormats && <option value="percent_parent">% of parent node</option>}
+                </select>
+              </label>
               <div className="metric-editor__actions">
                 <label>
                   <input type="checkbox" checked={metric.highlighted} disabled={metric.target} onChange={(event) => updateMetric(metric.id, { highlighted: event.target.checked })} />
                   <span>Highlight in node</span>
                 </label>
-                {canShowPercentage && (
-                  <label>
-                    <input type="checkbox" checked={metric.format === "percentage"} onChange={(event) => updateMetric(metric.id, { format: event.target.checked ? "percentage" : "number" })} />
-                    <span>Show as percentage</span>
-                  </label>
-                )}
                 {metric.target
                   ? <span className="metric-editor__managed">Managed in Target</span>
                   : <button className="remove-metric-button" type="button" aria-label={`Remove ${metric.variable} summary`} onClick={() => onMetricsChange(metrics.filter((item) => item.id !== metric.id))}>Remove</button>}
@@ -218,3 +289,4 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
     </div>
   );
 }
+import { useEffect, useRef } from "react";

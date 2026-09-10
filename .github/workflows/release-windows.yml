@@ -68,7 +68,9 @@ jobs:
           name: ControlTree ${{ github.ref_name }}
           generate_release_notes: true
           body: |
-            First Windows desktop preview of ControlTree.
+            ControlTree's interactive browser and desktop workbench.
+
+            This release adds background split recommendations, a variable-first split workflow, split insertion/removal, richer node metrics, tree and enriched-data exports, and node right-click actions including cross-window split copy/paste.
 
             - **Setup** installs ControlTree and adds normal Windows shortcuts.
             - **Portable EXE** runs without installation after download.

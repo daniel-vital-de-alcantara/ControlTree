@@ -38,6 +38,34 @@ describe("ControlTree project files", () => {
     expect(parseProjectText(JSON.stringify(project))).toEqual(project);
   });
 
+  it("preserves custom metric labels and display formats", () => {
+    const fields = { ...defaultNodeFields, rowCountFormat: "percent_parent" as const };
+    const project = createProject(tree, "outcome", defaultAppearance, fields, [
+      {
+        id: "metric-1",
+        variable: "sales",
+        aggregation: "sum",
+        highlighted: true,
+        label: "Exposure share",
+        format: "percent_root",
+      },
+      {
+        id: "metric-2",
+        variable: "sales",
+        aggregation: "sum",
+        highlighted: false,
+        format: "compact",
+      },
+    ]);
+    const restored = parseProjectText(JSON.stringify(project));
+
+    expect(restored.nodeFields.rowCountFormat).toBe("percent_parent");
+    expect(restored.summaries).toEqual([
+      { variable: "sales", aggregation: "sum", highlighted: true, label: "Exposure share", format: "percent_root" },
+      { variable: "sales", aggregation: "sum", highlighted: false, format: "compact" },
+    ]);
+  });
+
   it("rejects unrelated JSON", () => {
     expect(() => parseProjectText('{"hello":"world"}')).toThrow("not a ControlTree");
   });
@@ -124,5 +152,27 @@ describe("ControlTree project files", () => {
     expect(restored.sourceFileLastModified).toBe(1700000000000);
     expect(projectFingerprint(restored)).toBe(projectFingerprint(project));
     expect(JSON.stringify(project)).not.toContain("rowIndices");
+  });
+
+  it("stores the ten most recent unique node names", () => {
+    const names = ["Watch", "Review", "watch", "Escalate", "Approve", "Hold", "Close", "Open", "Refer", "Investigate", "Monitor", "Archive"];
+    const project = createProject(
+      tree,
+      null,
+      defaultAppearance,
+      defaultNodeFields,
+      [],
+      null,
+      {},
+      undefined,
+      undefined,
+      undefined,
+      defaultTargetSettings,
+      names,
+    );
+    const restored = parseProjectText(JSON.stringify(project));
+
+    expect(restored.nodeNameHistory).toHaveLength(10);
+    expect(restored.nodeNameHistory?.slice(0, 3)).toEqual(["Watch", "Review", "Escalate"]);
   });
 });

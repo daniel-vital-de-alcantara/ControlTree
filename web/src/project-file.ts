@@ -20,12 +20,13 @@ export type ControlTreeProject = {
   targetSettings?: TargetSettings;
   appearance: TreeAppearance;
   nodeFields: NodeFieldVisibility;
-  summaries: Array<{ variable: string; aggregation: SummaryAggregation; highlighted: boolean; format?: MetricFormat; target?: boolean }>;
+  summaries: Array<{ variable: string; aggregation: SummaryAggregation; highlighted: boolean; label?: string; format?: MetricFormat; target?: boolean }>;
   distribution?: DistributionSettings;
   variableTypes?: VariableTypeOverrides;
   sourceFileName?: string;
   sourceFileSize?: number;
   sourceFileLastModified?: number;
+  nodeNameHistory?: string[];
   tree: SavedTreeNode;
 };
 
@@ -44,6 +45,16 @@ function canonicalValue(value: unknown): unknown {
     );
   }
   return value;
+}
+
+function normalizedNodeNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  return names.map((name) => name.trim()).filter((name) => {
+    const key = name.toLocaleLowerCase();
+    if (!name || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 10);
 }
 
 export function projectFingerprint(project: ControlTreeProject): string {
@@ -70,6 +81,7 @@ export function createProject(
   sourceFileSize?: number,
   sourceFileLastModified?: number,
   targetSettings: TargetSettings = defaultTargetSettings,
+  nodeNameHistory: string[] = [],
 ): ControlTreeProject {
   return {
     format: CONTROLTREE_FORMAT,
@@ -78,11 +90,12 @@ export function createProject(
     targetSettings: { ...targetSettings },
     appearance: { ...appearance },
     nodeFields: { ...nodeFields },
-    summaries: summaries.map(({ variable, aggregation, highlighted, format, target }) => ({
+    summaries: summaries.map(({ variable, aggregation, highlighted, label, format, target }) => ({
       variable,
       aggregation,
       highlighted,
-      ...(format === "percentage" ? { format } : {}),
+      ...(label?.trim() ? { label: label.trim() } : {}),
+      ...(format && format !== "number" ? { format } : {}),
       ...(target ? { target: true } : {}),
     })),
     ...(distribution ? { distribution: { ...distribution } } : {}),
@@ -90,6 +103,7 @@ export function createProject(
     ...(sourceFileName ? { sourceFileName } : {}),
     ...(typeof sourceFileSize === "number" ? { sourceFileSize } : {}),
     ...(typeof sourceFileLastModified === "number" ? { sourceFileLastModified } : {}),
+    ...(nodeNameHistory.length ? { nodeNameHistory: normalizedNodeNames(nodeNameHistory) } : {}),
     tree: savedNode(tree),
   };
 }
@@ -198,7 +212,10 @@ export function parseProjectText(text: string): ControlTreeProject {
       variable: metric.variable,
       aggregation: metric.aggregation as SummaryAggregation,
       highlighted: metric.highlighted === true,
-      ...(metric.format === "percentage" ? { format: "percentage" as const } : {}),
+      ...(typeof metric.label === "string" && metric.label.trim() ? { label: metric.label.trim() } : {}),
+      ...(metric.format === "percentage" || metric.format === "compact" || metric.format === "percent_root" || metric.format === "percent_parent"
+        ? { format: metric.format as MetricFormat }
+        : {}),
       ...(metric.target === true ? { target: true } : {}),
     };
   });
@@ -209,6 +226,9 @@ export function parseProjectText(text: string): ControlTreeProject {
     nodeName: typeof savedFields.nodeName === "boolean" ? savedFields.nodeName : defaultNodeFields.nodeName,
     nodeTitle: typeof savedFields.nodeTitle === "boolean" ? savedFields.nodeTitle : defaultNodeFields.nodeTitle,
     rowCount: typeof savedFields.rowCount === "boolean" ? savedFields.rowCount : defaultNodeFields.rowCount,
+    rowCountFormat: savedFields.rowCountFormat === "percent_root" || savedFields.rowCountFormat === "percent_parent"
+      ? savedFields.rowCountFormat
+      : "count",
   };
   let distribution: DistributionSettings | undefined;
   if (project.distribution !== undefined) {
@@ -247,6 +267,13 @@ export function parseProjectText(text: string): ControlTreeProject {
       variableTypes[variable] = type;
     }
   }
+  let nodeNameHistory: string[] | undefined;
+  if (project.nodeNameHistory !== undefined) {
+    if (!Array.isArray(project.nodeNameHistory) || !project.nodeNameHistory.every((name) => typeof name === "string")) {
+      throw new Error("The saved node name history is invalid.");
+    }
+    nodeNameHistory = normalizedNodeNames(project.nodeNameHistory);
+  }
   return {
     format: CONTROLTREE_FORMAT,
     version: CONTROLTREE_VERSION,
@@ -269,6 +296,7 @@ export function parseProjectText(text: string): ControlTreeProject {
     ...(typeof project.sourceFileName === "string" && project.sourceFileName ? { sourceFileName: project.sourceFileName } : {}),
     ...(typeof project.sourceFileSize === "number" && Number.isFinite(project.sourceFileSize) ? { sourceFileSize: project.sourceFileSize } : {}),
     ...(typeof project.sourceFileLastModified === "number" && Number.isFinite(project.sourceFileLastModified) ? { sourceFileLastModified: project.sourceFileLastModified } : {}),
+    ...(nodeNameHistory?.length ? { nodeNameHistory } : {}),
   };
 }
 

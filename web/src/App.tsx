@@ -1,24 +1,30 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 
 import { DataSetup, type DatasetSelection } from "./DataSetup";
+import { downloadEnrichedCsv } from "./data-export";
 import { parseDatasetFile, summarizeTarget, type VariableType } from "./dataset";
 import { splitCandidates, initialTree } from "./demo-data";
 import { DistributionPane } from "./DistributionPane";
 import { createDistributionSnapshot, type DistributionSettings } from "./distribution";
-import { applyManualSplit, applySplit, describeRule, findTreeNode, renameTreeNode, type ManualSplitResult, type SplitCandidate, type TreeNode } from "./domain";
+import { applySplit, describeRule, findTreeNode, renameTreeNode, type ManualSplitResult, type SplitCandidate, type TreeNode } from "./domain";
 import { ManualSplitPane } from "./ManualSplitPane";
 import { pickDatasetFile } from "./file-picker";
 import { openPresentationWindow, presentationTree, publishPresentation, type PresentationState } from "./presentation";
 import { PresentationView } from "./PresentationView";
 import { createProject, projectFingerprint as fingerprintProject, saveProjectAs, type ControlTreeProject } from "./project-file";
 import { replayProject } from "./replay";
+import { candidateMatchesCurrentSplit, SplitPane } from "./SplitPane";
+import { copySplitsToClipboard, pasteCopiedSplits, readSplitsFromClipboard } from "./split-clipboard";
+import { applyPreparedSplit, preparedManualSplit, preparedRecommendedSplit, removeNodeSplit, type SplitApplication } from "./split-operations";
 import { TreeCanvas } from "./TreeCanvas";
+import { downloadTreePng } from "./tree-image";
 import { TreeSettingsPane } from "./TreeSettingsPane";
 import { TreeTestPane } from "./TreeTestPane";
 import { TargetPane } from "./TargetPane";
 import { defaultTargetSettings, type TargetSettings } from "./target-settings";
 import { fetchSplitSuggestions } from "./suggestions";
 import { buildNodeSummaries, defaultAppearance, defaultNodeFields, isNumericVariable, type NodeFieldVisibility, type SummaryMetric, type TreeAppearance } from "./tree-settings";
+import { visibleTree } from "./tree-visibility";
 
 export default function App() {
   const [selection, setSelection] = useState<DatasetSelection | "demo" | null>(null);
@@ -28,6 +34,8 @@ export default function App() {
   const [candidateCache, setCandidateCache] = useState<Record<string, SplitCandidate[]>>({});
   const [suggestionStatus, setSuggestionStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [suggestionError, setSuggestionError] = useState("");
+  const [suggestionElapsed, setSuggestionElapsed] = useState(0);
+  const [splitFeature, setSplitFeature] = useState("");
   const [sidebarMode, setSidebarMode] = useState<"node" | "tree" | "metrics" | "variables" | "target" | "test" | "present" | "more">("node");
   const [nodeTab, setNodeTab] = useState<"recommended" | "manual" | "distribution">("recommended");
   const [appearance, setAppearance] = useState<TreeAppearance>(defaultAppearance);
@@ -48,7 +56,14 @@ export default function App() {
   const [homeWarningOpen, setHomeWarningOpen] = useState(false);
   const [dataSourceError, setDataSourceError] = useState("");
   const [isChangingDataSource, setIsChangingDataSource] = useState(false);
+  const [isExportingTreeImage, setIsExportingTreeImage] = useState(false);
   const [paneWidth, setPaneWidth] = useState(390);
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const [collapsedNodeIds, setCollapsedNodeIds] = useState<string[]>([]);
+  const [nodeNameHistory, setNodeNameHistory] = useState<string[]>([]);
+  const [renameRequestId, setRenameRequestId] = useState(0);
+  const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
+  const [actionNotice, setActionNotice] = useState("");
   const canvasRef = useRef<HTMLDivElement>(null);
   const dataSourceInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<{
@@ -65,8 +80,6 @@ export default function App() {
     : candidateCache[selectedNodeId] ?? [];
   const selectedSplit = candidates.find((split) => split.id === selectedSplitId);
   const selectedNode = findTreeNode(tree, selectedNodeId);
-  const selectedNodeHasSplit = Boolean(selectedNode?.children.length);
-  const canSplitSelectedNode = selection !== "demo" || selectedNodeId === "root";
   const uploadedDataset = selection && selection !== "demo" ? selection.dataset : undefined;
   const recommendationTarget = selection === "demo" ? "survived" : selection?.recommendationTarget ?? null;
   const activeTestVariable = uploadedDataset
@@ -93,13 +106,15 @@ export default function App() {
     uploadedDataset?.fileSize,
     uploadedDataset?.fileLastModified,
     targetSettings,
-  ) : null, [selection, tree, recommendationTarget, appearance, nodeFields, summaryMetrics, activeDistributionSettings, uploadedDataset, targetSettings]);
+    nodeNameHistory,
+  ) : null, [selection, tree, recommendationTarget, appearance, nodeFields, summaryMetrics, activeDistributionSettings, uploadedDataset, targetSettings, nodeNameHistory]);
   const projectFingerprint = projectSnapshot ? fingerprintProject(projectSnapshot) : "";
   const isDirty = savedProjectFingerprint !== projectFingerprint;
   const nodeSummaries = useMemo(
     () => buildNodeSummaries(tree, uploadedDataset, summaryMetrics),
     [tree, uploadedDataset, summaryMetrics],
   );
+  const canvasTree = useMemo(() => visibleTree(tree, focusNodeId, collapsedNodeIds), [tree, focusNodeId, collapsedNodeIds]);
   const presentationDistribution = useMemo(() => {
     if (!showDistributionInPresentation || !uploadedDataset || !selectedNode || !activeDistributionSettings) return undefined;
     return createDistributionSnapshot(uploadedDataset, selectedNode, activeDistributionSettings);
@@ -107,7 +122,7 @@ export default function App() {
   const presentationState = useMemo<PresentationState | null>(() => {
     if (!selection) return null;
     return {
-      tree: presentationTree(tree),
+      tree: presentationTree(canvasTree),
       appearance,
       nodeFields,
       summaries: nodeSummaries,
@@ -116,7 +131,7 @@ export default function App() {
       targetName: recommendationTarget ?? undefined,
       distribution: presentationDistribution,
     };
-  }, [selection, tree, appearance, nodeFields, nodeSummaries, summaryMetrics.length, presentationDistribution, recommendationTarget]);
+  }, [selection, canvasTree, appearance, nodeFields, nodeSummaries, summaryMetrics.length, presentationDistribution, recommendationTarget]);
 
   useEffect(() => {
     if (!selection || selection === "demo") return;
@@ -129,7 +144,6 @@ export default function App() {
     if (!node?.rowIndices) return;
     const cached = candidateCache[selectedNodeId];
     if (cached) {
-      setSelectedSplitId(cached[0]?.id ?? "");
       setSuggestionStatus("ready");
       return;
     }
@@ -139,7 +153,6 @@ export default function App() {
     fetchSplitSuggestions(selection.dataset, selection.recommendationTarget, node.rowIndices, controller.signal)
       .then((nextCandidates) => {
         setCandidateCache((current) => ({ ...current, [selectedNodeId]: nextCandidates }));
-        setSelectedSplitId(nextCandidates[0]?.id ?? "");
         setSuggestionStatus("ready");
       })
       .catch((reason: unknown) => {
@@ -149,6 +162,28 @@ export default function App() {
       });
     return () => controller.abort();
   }, [selection, selectedNodeId, tree, candidateCache]);
+
+  useEffect(() => {
+    if (suggestionStatus !== "loading") {
+      setSuggestionElapsed(0);
+      return;
+    }
+    const started = performance.now();
+    setSuggestionElapsed(0);
+    const timer = window.setInterval(() => setSuggestionElapsed((performance.now() - started) / 1000), 100);
+    return () => window.clearInterval(timer);
+  }, [suggestionStatus, selectedNodeId]);
+
+  useEffect(() => {
+    if (!splitFeature) {
+      setSelectedSplitId("");
+      return;
+    }
+    const currentNode = findTreeNode(tree, selectedNodeId);
+    const featureCandidates = candidates.filter((candidate) => candidate.feature === splitFeature);
+    const currentMatch = currentNode ? featureCandidates.find((candidate) => candidateMatchesCurrentSplit(candidate, currentNode)) : undefined;
+    setSelectedSplitId((current) => currentMatch?.id ?? (featureCandidates.some((candidate) => candidate.id === current) ? current : featureCandidates[0]?.id ?? ""));
+  }, [candidates, selectedNodeId, splitFeature, tree]);
 
   useEffect(() => {
     if (!uploadedDataset) return;
@@ -172,13 +207,15 @@ export default function App() {
       const aggregation = !numeric && ["average", "sum", "min", "max"].includes(existing.aggregation)
         ? "mode"
         : existing.aggregation;
-      if (targetMetrics.length === 1 && existing.variable === recommendationTarget && existing.highlighted && existing.aggregation === aggregation) return current;
+      const format = aggregation === "mode" && existing.format !== "percentage" ? "number" : existing.format;
+      if (targetMetrics.length === 1 && existing.variable === recommendationTarget && existing.highlighted && existing.aggregation === aggregation && existing.format === format) return current;
       return current
         .filter((metric) => !metric.target || metric.id === existing.id)
         .map((metric) => metric.id === existing.id ? {
           ...metric,
           variable: recommendationTarget,
           aggregation,
+          format,
           highlighted: true,
           target: true,
         } : metric);
@@ -190,6 +227,28 @@ export default function App() {
   }, [presentationState]);
 
   useEffect(() => {
+    if (!actionNotice) return;
+    const timer = window.setTimeout(() => setActionNotice(""), 2600);
+    return () => window.clearTimeout(timer);
+  }, [actionNotice]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    function closeContextMenu(event: globalThis.PointerEvent) {
+      if (!(event.target as HTMLElement).closest(".node-context-menu")) setContextMenu(null);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setContextMenu(null);
+    }
+    window.addEventListener("pointerdown", closeContextMenu);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeContextMenu);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
     if (!presentHere) return;
     function handleFullscreenChange() {
       if (!document.fullscreenElement) setPresentHere(false);
@@ -198,25 +257,38 @@ export default function App() {
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, [presentHere]);
 
-  function handleApply() {
+  function handleApply(mode: SplitApplication = "replace") {
     if (!selectedSplit) return;
-    setTree((current) => applySplit(current, selectedNodeId, selectedSplit));
+    if (selection === "demo") setTree((current) => applySplit(current, selectedNodeId, selectedSplit));
+    else setTree((current) => applyPreparedSplit(current, selectedNodeId, preparedRecommendedSplit(selectedSplit), mode, uploadedDataset));
     setCandidateCache((current) => Object.fromEntries(
       Object.entries(current).filter(([nodeId]) => !nodeId.startsWith(`${selectedNodeId}.`)),
     ));
     setSelectedNodeId(`${selectedNodeId}.1`);
+    setSplitFeature("");
     setSuggestionStatus("loading");
   }
 
-  function handleManualApply(split: ManualSplitResult) {
+  function handleManualApply(split: ManualSplitResult, mode: SplitApplication) {
     const nodeId = selectedNodeId;
-    setTree((current) => applyManualSplit(current, nodeId, split));
+    setTree((current) => applyPreparedSplit(current, nodeId, preparedManualSplit(split), mode, uploadedDataset));
     setCandidateCache((current) => Object.fromEntries(
       Object.entries(current).filter(([cachedNodeId]) => !cachedNodeId.startsWith(`${nodeId}.`)),
     ));
     setSelectedNodeId(`${nodeId}.1`);
+    setSplitFeature("");
     setNodeTab("recommended");
     setSuggestionStatus("loading");
+  }
+
+  function handleRemoveSelectedSplit() {
+    if (!selectedNodeId) return;
+    setTree((current) => removeNodeSplit(current, selectedNodeId));
+    setCandidateCache((current) => Object.fromEntries(Object.entries(current).filter(([nodeId]) => !nodeId.startsWith(`${selectedNodeId}.`))));
+    setSplitFeature("");
+    setSelectedSplitId("");
+    setNodeTab("recommended");
+    setCollapsedNodeIds((current) => current.filter((nodeId) => !nodeId.startsWith(`${selectedNodeId}.`)));
   }
 
   function handleReset() {
@@ -233,11 +305,17 @@ export default function App() {
     }
     setSelectedNodeId("");
     setInspectorOpen(false);
+    setFocusNodeId(null);
+    setCollapsedNodeIds([]);
   }
 
   function handleDataset(selectionValue: DatasetSelection) {
     setCandidateCache({});
     setSummaryMetrics([]);
+    setNodeNameHistory([]);
+    setFocusNodeId(null);
+    setCollapsedNodeIds([]);
+    setNodeFields(defaultNodeFields);
     setTargetSettings(defaultTargetSettings);
     setTestVariable(selectionValue.dataset.columns[0] ?? "");
     setTargetError("");
@@ -294,6 +372,9 @@ export default function App() {
     setDistributionSettings(restoredDistribution);
     setShowDistributionInPresentation(false);
     setSummaryMetrics(restoredMetrics);
+    setNodeNameHistory(project.nodeNameHistory ?? []);
+    setFocusNodeId(null);
+    setCollapsedNodeIds([]);
     setSelectedNodeId("");
     const shouldPromptForTarget = !restoredTarget && !restoredTargetSettings.dismissTargetReminder;
     setSidebarMode(shouldPromptForTarget ? "target" : "node");
@@ -318,6 +399,7 @@ export default function App() {
       configuredDataset.fileSize,
       configuredDataset.fileLastModified,
       restoredTargetSettings,
+      project.nodeNameHistory ?? [],
     )));
   }
 
@@ -371,6 +453,10 @@ export default function App() {
 
   function handleDemo() {
     setSummaryMetrics([]);
+    setNodeNameHistory([]);
+    setFocusNodeId(null);
+    setCollapsedNodeIds([]);
+    setNodeFields(defaultNodeFields);
     setTargetSettings(defaultTargetSettings);
     setSelection("demo");
     setTree(initialTree);
@@ -417,11 +503,12 @@ export default function App() {
     "--tree-background-color": appearance.backgroundColor,
     "--tree-grid-opacity": appearance.showGrid ? .32 : 0,
     "--summary-count": summaryMetrics.length,
-    "--visible-field-count": Object.values(nodeFields).filter(Boolean).length,
+    "--visible-field-count": [nodeFields.nodeName, nodeFields.nodeTitle, nodeFields.rowCount].filter(Boolean).length,
     "--canvas-grid-size": `${22 * viewport.scale}px`,
     "--canvas-grid-x": `${viewport.x}px`,
     "--canvas-grid-y": `${viewport.y}px`,
   } as CSSProperties;
+  const contextNode = contextMenu ? findTreeNode(tree, contextMenu.nodeId) : undefined;
 
   function selectNode(nodeId: string) {
     if (inspectorOpen && (sidebarMode === "test" || sidebarMode === "metrics")) {
@@ -429,11 +516,78 @@ export default function App() {
       setHelpOpen(false);
       return;
     }
-    if (!(inspectorOpen && sidebarMode === "node" && nodeTab === "distribution")) setNodeTab("recommended");
+    const node = findTreeNode(tree, nodeId);
+    if (!(inspectorOpen && sidebarMode === "node" && nodeTab === "distribution")) setNodeTab(node?.split?.kind === "manual" ? "manual" : "recommended");
+    setSplitFeature(node?.split?.feature ?? "");
     setSelectedNodeId(nodeId);
     setSidebarMode("node");
     setInspectorOpen(true);
     setHelpOpen(false);
+  }
+
+  function openNodeContextMenu(nodeId: string, x: number, y: number) {
+    setSelectedNodeId(nodeId);
+    setContextMenu({
+      nodeId,
+      x: Math.max(8, Math.min(x, window.innerWidth - 254)),
+      y: Math.max(8, Math.min(y, window.innerHeight - 390)),
+    });
+  }
+
+  function beginContextRename(nodeId: string) {
+    setContextMenu(null);
+    setSelectedNodeId(nodeId);
+    setSidebarMode("metrics");
+    setInspectorOpen(true);
+    setHelpOpen(false);
+    setRenameRequestId((current) => current + 1);
+  }
+
+  function rememberNodeName(title: string) {
+    setNodeNameHistory((current) => [title, ...current.filter((name) => name.toLocaleLowerCase() !== title.toLocaleLowerCase())].slice(0, 10));
+  }
+
+  async function copyContextSplits(node: TreeNode, mode: "single" | "subtree") {
+    setContextMenu(null);
+    try {
+      const systemClipboard = await copySplitsToClipboard(node, mode);
+      setActionNotice(systemClipboard
+        ? mode === "single" ? "Split copied to the clipboard." : "All splits below this node copied to the clipboard."
+        : "Split copied inside ControlTree. This browser blocked the system clipboard.");
+    } catch (reason) {
+      setDataSourceError(reason instanceof Error ? reason.message : "The split could not be copied.");
+    }
+  }
+
+  async function pasteContextSplits(nodeId: string) {
+    setContextMenu(null);
+    if (!uploadedDataset) return;
+    try {
+      const payload = await readSplitsFromClipboard();
+      const nextTree = pasteCopiedSplits(uploadedDataset, tree, nodeId, payload);
+      setTree(nextTree);
+      setCandidateCache((current) => Object.fromEntries(Object.entries(current).filter(([cachedId]) => cachedId !== nodeId && !cachedId.startsWith(`${nodeId}.`))));
+      setCollapsedNodeIds((current) => current.filter((collapsedId) => collapsedId !== nodeId && !collapsedId.startsWith(`${nodeId}.`)));
+      const pastedNode = findTreeNode(nextTree, nodeId);
+      setSplitFeature(pastedNode?.split?.feature ?? "");
+      setNodeTab(pastedNode?.split?.kind === "manual" ? "manual" : "recommended");
+      setActionNotice(payload.mode === "single" ? "Split pasted." : "Split subtree pasted.");
+    } catch (reason) {
+      setDataSourceError(reason instanceof Error ? reason.message : "The copied split could not be pasted here.");
+    }
+  }
+
+  function trimContextNode(nodeId: string) {
+    setContextMenu(null);
+    setTree((current) => removeNodeSplit(current, nodeId));
+    setCandidateCache((current) => Object.fromEntries(Object.entries(current).filter(([cachedId]) => cachedId !== nodeId && !cachedId.startsWith(`${nodeId}.`))));
+    setCollapsedNodeIds((current) => current.filter((collapsedId) => collapsedId !== nodeId && !collapsedId.startsWith(`${nodeId}.`)));
+    if (selectedNodeId === nodeId) {
+      setSplitFeature("");
+      setSelectedSplitId("");
+      setNodeTab("recommended");
+    }
+    setActionNotice("Splits below the node removed.");
   }
 
   function toggleTreeSettings() {
@@ -496,7 +650,8 @@ export default function App() {
       return;
     }
     setSidebarMode("node");
-    setNodeTab("recommended");
+    setNodeTab(selectedNode?.split?.kind === "manual" ? "manual" : "recommended");
+    setSplitFeature(selectedNode?.split?.feature ?? "");
     setInspectorOpen(true);
   }
 
@@ -519,6 +674,30 @@ export default function App() {
     if (!active) {
       setSidebarMode("present");
       setSelectedNodeId("");
+    }
+  }
+
+  async function handleTreeImageDownload() {
+    const treeElement = canvasRef.current?.querySelector<HTMLElement>(".canvas__tree-origin > .tree");
+    if (!treeElement) return;
+    setIsExportingTreeImage(true);
+    setDataSourceError("");
+    try {
+      await downloadTreePng(treeElement, appearance, uploadedDataset?.fileName ?? "ControlTree");
+    } catch (reason) {
+      setDataSourceError(reason instanceof Error ? reason.message : "The tree image could not be created.");
+    } finally {
+      setIsExportingTreeImage(false);
+    }
+  }
+
+  function handleEnrichedDataDownload() {
+    if (!uploadedDataset) return;
+    try {
+      setDataSourceError("");
+      downloadEnrichedCsv(uploadedDataset, tree, recommendationTarget);
+    } catch (reason) {
+      setDataSourceError(reason instanceof Error ? reason.message : "The enriched dataset could not be created.");
     }
   }
 
@@ -669,6 +848,9 @@ export default function App() {
       setSuggestionStatus("idle");
       setInspectorOpen(false);
       setHelpOpen(false);
+      setFocusNodeId(null);
+      setCollapsedNodeIds([]);
+      setContextMenu(null);
     } catch (reason) {
       setDataSourceError(reason instanceof Error ? reason.message : "The new data source could not be applied.");
     } finally {
@@ -705,6 +887,7 @@ export default function App() {
     setInspectorOpen(false);
     setHelpOpen(false);
     setHomeWarningOpen(false);
+    setContextMenu(null);
   }
 
   const inspectorCopy = sidebarMode === "target"
@@ -718,7 +901,7 @@ export default function App() {
           : sidebarMode === "tree"
             ? { title: "Tree settings", description: "Control the colors, background, and visual appearance of the whole tree." }
             : sidebarMode === "present"
-              ? { title: "Present tree", description: "Show the tree fullscreen here or keep it synchronized on another screen." }
+              ? { title: "Present tree", description: "Present the tree live or export it and its row-level results." }
               : sidebarMode === "more"
                 ? { title: "More actions", description: "Save the project, change its data source, download the app, or reset the tree." }
                 : nodeTab === "distribution"
@@ -777,6 +960,7 @@ export default function App() {
 
       <main id="workspace" className="workspace">
         {dataSourceError && <div className="workspace-error" role="alert"><span>{dataSourceError}</span><button type="button" onClick={() => setDataSourceError("")} aria-label="Dismiss message">×</button></div>}
+        {actionNotice && <div className="workspace-notice" role="status">{actionNotice}</div>}
         <section className="canvas-panel">
           <div
             ref={canvasRef}
@@ -792,11 +976,13 @@ export default function App() {
             <div className="canvas__camera" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` }}>
               <div className="canvas__tree-origin">
                 <TreeCanvas
-                  node={tree}
+                  node={canvasTree}
                   selectedNodeId={selectedNodeId}
                   onSelectNode={selectNode}
+                  onNodeContextMenu={openNodeContextMenu}
                   summaries={nodeSummaries}
                   nodeFields={nodeFields}
+                  rootSamples={tree.samples}
                 />
               </div>
             </div>
@@ -845,6 +1031,14 @@ export default function App() {
                 <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="15" height="12" rx="2"/><path d="M8 21h10a3 3 0 0 0 3-3V9M7 17v4"/></svg>
                 <span><strong>Present on another screen</strong><small>Keep editing here while the presentation stays synchronized.</small></span>
               </button>
+              <button className="more-action" type="button" disabled={isExportingTreeImage} onClick={handleTreeImageDownload}>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="2"/><path d="m3 17 5-5 4 4 3-3 6 6"/></svg>
+                <span><strong>{isExportingTreeImage ? "Creating tree image…" : "Download tree image"}</strong><small>Save a clean PNG using the current colors and canvas background.</small></span>
+              </button>
+              <button className="more-action" type="button" disabled={!uploadedDataset} onClick={handleEnrichedDataDownload}>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 3h16v18H4zM4 9h16M10 3v18M14 13h3M15.5 11.5V16"/></svg>
+                <span><strong>Download data with tree results</strong><small>{uploadedDataset ? `Export all rows as CSV with node details${recommendationTarget ? ", predictions, and errors" : ""}.` : "Available after loading a CSV or Excel dataset."}</small></span>
+              </button>
             </div>
           ) : sidebarMode === "more" ? (
             <div className="more-actions-pane">
@@ -888,19 +1082,15 @@ export default function App() {
               onNodeFieldsChange={setNodeFields}
               onMetricsChange={setSummaryMetrics}
               onNodeTitleChange={(title) => selectedNodeId && setTree((current) => renameTreeNode(current, selectedNodeId, title))}
+              onNodeTitleCommit={rememberNodeName}
+              nodeNameSuggestions={nodeNameHistory}
+              renameRequestId={renameRequestId}
               onVariableTypeChange={handleVariableTypeChange}
             />
           ) : !selectedNode ? (
             <div className="empty-state">Select a node to continue.</div>
           ) : (
             <>
-              {nodeTab !== "distribution" && (
-                <div className="subtabs subtabs--flush" role="tablist" aria-label="Split method">
-                  <button className={nodeTab === "recommended" ? "active" : ""} type="button" onClick={() => setNodeTab("recommended")}>Recommended</button>
-                  <button className={nodeTab === "manual" ? "active" : ""} type="button" onClick={() => setNodeTab("manual")}>Manual split</button>
-                </div>
-              )}
-
               {nodeTab === "distribution" ? (
                 uploadedDataset && selectedNode?.rowIndices && activeDistributionSettings ? (
                   <DistributionPane
@@ -920,17 +1110,20 @@ export default function App() {
               ) : nodeTab === "manual" ? (
                 uploadedDataset && selectedNode?.rowIndices ? (
                   <ManualSplitPane
-                    key={selectedNode.id}
+                    key={`${selectedNode.id}:${splitFeature}`}
                     dataset={uploadedDataset}
                     node={selectedNode}
+                    feature={splitFeature || selectedNode.split?.feature || uploadedDataset.columns.find((column) => column !== recommendationTarget) || uploadedDataset.columns[0] || ""}
+                    onBack={() => { setNodeTab("recommended"); setSplitFeature(""); }}
                     onApply={handleManualApply}
+                    onRemoveSplit={handleRemoveSelectedSplit}
                   />
                 ) : (
                   <div className="empty-state">Upload a dataset to create manual multiway splits.</div>
                 )
-              ) : (
+              ) : uploadedDataset && selectedNode.rowIndices ? (
                 <>
-                  {uploadedDataset && !targetSettings.useForRecommendations && (
+                  {!targetSettings.useForRecommendations && (
                     <div className="recommendation-target">
                       <label className="field-label" htmlFor="recommendation-target">Recommendation target</label>
                       <select id="recommendation-target" value={recommendationTarget ?? ""} onChange={(event) => handleTargetChange(event.target.value)}>
@@ -940,60 +1133,70 @@ export default function App() {
                       {targetError && <p className="form-error" role="alert">{targetError}</p>}
                     </div>
                   )}
-                  {canSplitSelectedNode && candidates.length > 0 ? (
-                    <div className="suggestions" role="radiogroup" aria-label="Split suggestions">
-                      {candidates.map((candidate, index) => (
-                        <label className={`suggestion${selectedSplitId === candidate.id ? " suggestion--selected" : ""}`} key={candidate.id}>
-                          <input
-                            type="radio"
-                            name="split"
-                            value={candidate.id}
-                            checked={selectedSplitId === candidate.id}
-                            onChange={() => setSelectedSplitId(candidate.id)}
-                          />
-                          <span className="suggestion__rank">{String(index + 1).padStart(2, "0")}</span>
-                          <span className="suggestion__body">
-                            <strong>{describeRule(candidate)}</strong>
-                            <span>{candidate.leftCount} / {candidate.rightCount} rows</span>
-                          </span>
-                          <span className="gain">+{candidate.gain.toFixed(3)}</span>
-                        </label>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="empty-state">
-                      {canSplitSelectedNode && suggestionStatus === "loading"
-                        ? "Computing split suggestions…"
-                        : canSplitSelectedNode && suggestionStatus === "error"
-                          ? suggestionError
-                          : selection === "demo" && selectedNodeId !== "root"
-                            ? "Upload a dataset to compute consecutive split suggestions."
-                          : canSplitSelectedNode && !recommendationTarget
-                            ? "Choose a target in the Target variable tool to calculate split suggestions."
-                          : canSplitSelectedNode
-                            ? "No valid split meets the minimum branch size for this dataset."
-                        : "Select a node to continue."}
-                    </div>
-                  )}
-
-                  {selectedSplit && (
-                    <>
-                      <div className="selection-summary">
-                        <span>{selectedSplit.criterion ?? "Expected gain"}</span>
-                        <strong>{selectedSplit.gain.toFixed(4)}</strong>
-                      </div>
-                      <button className="primary-button" type="button" onClick={handleApply} disabled={!canSplitSelectedNode}>
-                        {selectedNodeHasSplit ? "Replace node split" : "Apply selected split"}
-                        <span aria-hidden="true">→</span>
-                      </button>
-                    </>
-                  )}
-                  <p className="prototype-note">Suggestions are recalculated for this node's rows and target type.</p>
+                  <SplitPane
+                    dataset={uploadedDataset}
+                    node={selectedNode}
+                    target={recommendationTarget}
+                    candidates={candidates}
+                    status={suggestionStatus}
+                    error={suggestionError}
+                    elapsedSeconds={suggestionElapsed}
+                    feature={splitFeature}
+                    selectedSplitId={selectedSplitId}
+                    onFeatureChange={(feature) => {
+                      setSplitFeature(feature);
+                      const first = candidates.find((candidate) => candidate.feature === feature);
+                      setSelectedSplitId(first?.id ?? "");
+                    }}
+                    onCandidateChange={setSelectedSplitId}
+                    onManual={() => setNodeTab("manual")}
+                    onApply={handleApply}
+                    onRemoveSplit={handleRemoveSelectedSplit}
+                  />
                 </>
+              ) : selection === "demo" && selectedNodeId === "root" ? (
+                <>
+                  <div className="suggestions" role="radiogroup" aria-label="Demo split suggestions">
+                    {candidates.map((candidate, index) => (
+                      <label className={`suggestion${selectedSplitId === candidate.id ? " suggestion--selected" : ""}`} key={candidate.id}>
+                        <input type="radio" name="split" value={candidate.id} checked={selectedSplitId === candidate.id} onChange={() => setSelectedSplitId(candidate.id)} />
+                        <span className="suggestion__rank">{String(index + 1).padStart(2, "0")}</span>
+                        <span className="suggestion__body"><strong>{describeRule(candidate)}</strong><span>{candidate.leftCount} / {candidate.rightCount} rows</span></span>
+                        <span className="gain">+{candidate.gain.toFixed(3)}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {selectedSplit && <button className="primary-button" type="button" onClick={() => handleApply("replace")}>Apply demo split<span aria-hidden="true">→</span></button>}
+                </>
+              ) : (
+                <div className="empty-state">Upload a dataset to compute consecutive split suggestions.</div>
               )}
             </>
           )}
         </aside>
+
+        {contextMenu && contextNode && (
+          <div className="node-context-menu" role="menu" aria-label={`Actions for ${contextNode.title}`} style={{ left: contextMenu.x, top: contextMenu.y }} onContextMenu={(event) => event.preventDefault()}>
+            <div className="node-context-menu__heading"><span>Node {contextNode.id}</span><strong>{contextNode.title}</strong></div>
+            <button role="menuitem" type="button" onClick={() => beginContextRename(contextNode.id)}><span>✎</span><span><strong>Rename node</strong><small>Open Metrics and start typing</small></span></button>
+            <div className="node-context-menu__separator" />
+            <button role="menuitem" type="button" disabled={contextNode.id === tree.id && !focusNodeId} onClick={() => {
+              setContextMenu(null);
+              setFocusNodeId(focusNodeId === contextNode.id ? null : contextNode.id);
+              setViewport({ x: 0, y: 0, scale: 1 });
+            }}><span>↥</span><span><strong>{focusNodeId === contextNode.id ? "Show nodes above" : "Hide nodes above"}</strong><small>{focusNodeId === contextNode.id ? "Return to the complete tree" : "Focus the canvas on this branch"}</small></span></button>
+            <button role="menuitem" type="button" disabled={!contextNode.children.length && !collapsedNodeIds.includes(contextNode.id)} onClick={() => {
+              setContextMenu(null);
+              setCollapsedNodeIds((current) => current.includes(contextNode.id) ? current.filter((id) => id !== contextNode.id) : [...current, contextNode.id]);
+            }}><span>↧</span><span><strong>{collapsedNodeIds.includes(contextNode.id) ? "Show nodes below" : "Hide nodes below"}</strong><small>Temporarily {collapsedNodeIds.includes(contextNode.id) ? "expand" : "collapse"} this branch</small></span></button>
+            <div className="node-context-menu__separator" />
+            <button role="menuitem" type="button" disabled={!contextNode.split} onClick={() => void copyContextSplits(contextNode, "single")}><span>⧉</span><span><strong>Copy split</strong><small>Copy only this node’s rule</small></span></button>
+            <button role="menuitem" type="button" disabled={!contextNode.split} onClick={() => void copyContextSplits(contextNode, "subtree")}><span>⎘</span><span><strong>Copy all splits below</strong><small>Copy this complete split subtree</small></span></button>
+            <button role="menuitem" type="button" disabled={!uploadedDataset} onClick={() => void pasteContextSplits(contextNode.id)}><span>↳</span><span><strong>Paste split</strong><small>{contextNode.children.length ? "Replace this subtree using these rows" : "Rebuild the copied rule with these rows"}</small></span></button>
+            <div className="node-context-menu__separator" />
+            <button className="node-context-menu__danger" role="menuitem" type="button" disabled={!contextNode.children.length} onClick={() => trimContextNode(contextNode.id)}><span>⌫</span><span><strong>Trim splits below</strong><small>Remove this split and its descendants</small></span></button>
+          </div>
+        )}
 
         <aside className={`help-drawer${helpOpen ? " help-drawer--open" : ""}`} style={{ "--pane-width": `${paneWidth}px` } as CSSProperties} aria-label="ControlTree guide" aria-hidden={!helpOpen}>
           <div className="pane-resize-handle" role="separator" aria-label="Resize guide pane" aria-orientation="vertical" onPointerDown={startPaneResize} onPointerMove={movePaneResize} onPointerUp={finishPaneResize} onPointerCancel={finishPaneResize} />
@@ -1001,11 +1204,11 @@ export default function App() {
             <div><strong>ControlTree guide</strong><p>Learn the essential controls for building, exploring, saving, and presenting a tree.</p></div>
             <button className="inspector__close" type="button" onClick={() => setHelpOpen(false)} aria-label="Close guide">×</button>
           </div>
-          <section><h3>1. Navigate the workspace</h3><p>Scroll to zoom. Drag empty space to move around the tree. Click a node to inspect it and choose its next split.</p></section>
+          <section><h3>1. Navigate the workspace</h3><p>Scroll to zoom. Drag empty space to move around the tree. Click a node to inspect it. Right-click a node to rename it, focus or collapse branches, copy and paste splits, or trim descendants.</p></section>
           <section><h3>2. Choose the target role</h3><p>The first toolbar tool defines the project target and where ControlTree should reuse it automatically.</p></section>
-          <section><h3>3. Split, explore, and format</h3><p>Recommended splits can use the target automatically. Distribution explores values, Test measures separation, Metrics controls node summaries, Variable types defines data, and Tree settings controls appearance.</p></section>
-          <section><h3>4. Save or present</h3><p>Save downloads a reusable project configuration without source rows. Present here uses fullscreen; Another screen stays synchronized while you continue editing.</p></section>
-          <section><h3>Privacy</h3><p>CSV and Excel data is processed locally in the browser. Presentation state includes the tree and calculated display values, not the uploaded rows.</p></section>
+          <section><h3>3. Split, explore, and format</h3><p>The Split tool ranks variables first, then offers recommended or manual rules. Existing splits can be replaced, removed, or moved below a newly inserted split. Distribution explores values, Test measures separation, Metrics controls node summaries, Variable types defines data, and Tree settings controls appearance.</p></section>
+          <section><h3>4. Save, present, or export</h3><p>Save creates a reusable project configuration without source rows. The Present tool supports fullscreen, a synchronized second screen, a clean tree PNG, and a CSV enriched with each row's node and optional target prediction.</p></section>
+          <section><h3>Privacy</h3><p>CSV and Excel data is processed locally in the browser. Presentation state and tree images do not contain uploaded rows. The enriched CSV contains your source rows because it is created for you as a local download; it is not uploaded anywhere.</p></section>
           <a className="help-github-link" href="https://github.com/daniel-vital-de-alcantara/ControlTree" target="_blank" rel="noreferrer">More documentation on GitHub ↗</a>
         </aside>
 

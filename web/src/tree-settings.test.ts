@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { ParsedDataset } from "./dataset";
-import { buildNodeSummaries, isNumericVariable, summarizeMetric } from "./tree-settings";
+import { buildNodeSummaries, defaultNodeFields, isNumericVariable, metricLabel, summarizeMetric } from "./tree-settings";
 import type { TreeNode } from "./domain";
+import { rowCountLabel } from "./TreeCanvas";
 
 const dataset: ParsedDataset = {
   fileName: "sample.csv",
@@ -98,5 +99,68 @@ describe("tree summaries", () => {
       highlighted: false,
       format: "percentage",
     })).toBe("66.7%");
+  });
+
+  it("uses a custom display name when one is supplied", () => {
+    expect(metricLabel({
+      id: "ead",
+      variable: "amount",
+      aggregation: "sum",
+      highlighted: true,
+      label: "Exposure",
+    })).toBe("Exposure");
+  });
+
+  it("supports compact values and root-relative metric percentages", () => {
+    const largeDataset: ParsedDataset = {
+      fileName: "large.csv",
+      columns: ["amount"],
+      rows: [[2500], [2500]],
+    };
+    expect(summarizeMetric(largeDataset, [0, 1], {
+      id: "compact",
+      variable: "amount",
+      aggregation: "sum",
+      highlighted: false,
+      format: "compact",
+    })).toMatch(/^5K$/i);
+
+    expect(summarizeMetric(dataset, [0], {
+      id: "relative",
+      variable: "amount",
+      aggregation: "sum",
+      highlighted: false,
+      format: "percent_root",
+    }, [0, 1, 2])).toBe("33.3%");
+  });
+
+  it("calculates relative metrics against each node's parent", () => {
+    const tree: TreeNode = {
+      id: "root",
+      title: "All rows",
+      samples: 3,
+      rowIndices: [0, 1, 2],
+      children: [{
+        id: "root.1",
+        title: "First branch",
+        samples: 2,
+        rowIndices: [0, 1],
+        children: [{ id: "root.1.1", title: "Leaf", samples: 1, rowIndices: [0], children: [] }],
+      }],
+    };
+    const summaries = buildNodeSummaries(tree, dataset, [{
+      id: "parent-share",
+      variable: "amount",
+      aggregation: "sum",
+      highlighted: false,
+      format: "percent_parent",
+    }]);
+    expect(summaries["root.1.1"][0].value).toBe("33.3%");
+  });
+
+  it("formats row count as a share of the root or parent node", () => {
+    const node: TreeNode = { id: "root.1", title: "Branch", samples: 25, children: [] };
+    expect(rowCountLabel(node, { ...defaultNodeFields, rowCountFormat: "percent_root" }, 100, 50)).toBe("25% of root rows");
+    expect(rowCountLabel(node, { ...defaultNodeFields, rowCountFormat: "percent_parent" }, 100, 50)).toBe("50% of parent rows");
   });
 });

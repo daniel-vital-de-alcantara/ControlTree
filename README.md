@@ -80,9 +80,22 @@ connector, and canvas colors and can show or hide the dotted grid. Its Metrics
 section controls the standard node fields and supports unlimited calculated
 metrics. Every metric can independently receive highlighted treatment in the
 node cards.
+The Split tool starts by ranking variables, then shows up to three recommended
+rules for the chosen variable alongside the manual option. Recommendation work
+runs in a browser worker so the canvas remains interactive and reports elapsed
+calculation time. Existing nodes reopen on their saved rule and can replace it,
+insert a new rule above it while reapplying the existing subtree, or remove the
+split and its descendants.
+Right-clicking a node opens ControlTree-specific actions for renaming, focusing
+or collapsing branches, copying one split or an entire split subtree, pasting
+rules into another node or app window, and trimming descendants. The ten most
+recent node names are saved with the project and offered as rename suggestions.
 The presentation button opens a second, synchronized tree-only window for live
 client sessions. It receives the tree and calculated display values, not raw
-dataset rows. A tree can also be downloaded as a versioned, data-free
+dataset rows. The same tool can download a clean PNG of the complete tree or an
+enriched CSV whose leading columns identify each row's terminal node. When a
+target is configured, the CSV also includes the node prediction and either a
+numeric residual or categorical zero-or-one error. A tree can also be downloaded as a versioned, data-free
 `.controltree.json` file. After choosing a compatible newer dataset on the
 opening screen, that file can replay the split rules, colors, and summary
 settings while recalculating every node from the new rows.

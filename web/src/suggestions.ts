@@ -27,12 +27,12 @@ function gini(values: Array<DataValue | undefined>): number {
   return 1 - [...counts.values()].reduce((sum, count) => sum + ((count / observed.length) ** 2), 0);
 }
 
-export async function fetchSplitSuggestions(
+export function calculateSplitSuggestions(
   dataset: ParsedDataset,
   target: string,
   rowIndices?: number[],
   signal?: AbortSignal,
-): Promise<SplitCandidate[]> {
+): SplitCandidate[] {
   if (signal?.aborted) throw new DOMException("The calculation was cancelled.", "AbortError");
   const indices = observedRowIndices(dataset, rowIndices);
   if (indices.length < 2) return [];
@@ -62,7 +62,10 @@ export async function fetchSplitSuggestions(
         (_, index) => quantile(sorted, 0.05 + (index * 0.9 / 19)),
       ))];
     } else {
-      candidateValues = frequencyValues(featureValues);
+      // Ranking every unique value in identifier-like columns can take minutes.
+      // The most frequent values provide useful categorical candidates while
+      // keeping the background calculation bounded.
+      candidateValues = frequencyValues(featureValues).slice(0, 30);
     }
 
     for (const value of candidateValues) {
@@ -96,8 +99,45 @@ export async function fetchSplitSuggestions(
 
   candidates.sort((left, right) => right.gain - left.gain);
   if (signal?.aborted) throw new DOMException("The calculation was cancelled.", "AbortError");
-  return candidates.slice(0, 8).map((candidate, index) => ({
+  const featureCounts = new Map<string, number>();
+  const selected = candidates.filter((candidate) => {
+    const count = featureCounts.get(candidate.feature) ?? 0;
+    featureCounts.set(candidate.feature, count + 1);
+    return count < 3;
+  });
+  return selected.map((candidate, index) => ({
     ...candidate,
     id: `${candidate.feature}-${index + 1}`,
   }));
+}
+
+export async function fetchSplitSuggestions(
+  dataset: ParsedDataset,
+  target: string,
+  rowIndices?: number[],
+  signal?: AbortSignal,
+): Promise<SplitCandidate[]> {
+  if (signal?.aborted) throw new DOMException("The calculation was cancelled.", "AbortError");
+  if (typeof Worker === "undefined") return calculateSplitSuggestions(dataset, target, rowIndices, signal);
+
+  const worker = new Worker(new URL("./suggestions.worker.ts", import.meta.url), { type: "module" });
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      worker.terminate();
+      reject(new DOMException("The calculation was cancelled.", "AbortError"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    worker.onmessage = (event: MessageEvent<{ candidates?: SplitCandidate[]; error?: string }>) => {
+      signal?.removeEventListener("abort", abort);
+      worker.terminate();
+      if (event.data.error) reject(new Error(event.data.error));
+      else resolve(event.data.candidates ?? []);
+    };
+    worker.onerror = (event) => {
+      signal?.removeEventListener("abort", abort);
+      worker.terminate();
+      reject(new Error(event.message || "Could not compute split suggestions."));
+    };
+    worker.postMessage({ dataset, target, rowIndices });
+  });
 }

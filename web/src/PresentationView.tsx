@@ -49,7 +49,11 @@ export function PresentationView({ onExit }: { onExit?: () => void } = {}) {
     "--tree-background-color": state.appearance.backgroundColor ?? defaultAppearance.backgroundColor,
     "--tree-grid-opacity": (state.appearance.showGrid ?? defaultAppearance.showGrid) ? .32 : 0,
     "--summary-count": state.summaryCount,
-    "--visible-field-count": Object.values(state.nodeFields ?? defaultNodeFields).filter(Boolean).length,
+    "--visible-field-count": [
+      (state.nodeFields ?? defaultNodeFields).nodeName,
+      (state.nodeFields ?? defaultNodeFields).nodeTitle,
+      (state.nodeFields ?? defaultNodeFields).rowCount,
+    ].filter(Boolean).length,
     "--presentation-zoom": zoom,
   } as CSSProperties;
 

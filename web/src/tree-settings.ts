@@ -14,16 +14,18 @@ export type NodeFieldVisibility = {
   nodeName: boolean;
   nodeTitle: boolean;
   rowCount: boolean;
+  rowCountFormat: "count" | "percent_root" | "percent_parent";
 };
 
 export type SummaryAggregation = "average" | "sum" | "min" | "max" | "count" | "distinct" | "missing" | "mode";
-export type MetricFormat = "number" | "percentage";
+export type MetricFormat = "number" | "percentage" | "compact" | "percent_root" | "percent_parent";
 
 export type SummaryMetric = {
   id: string;
   variable: string;
   aggregation: SummaryAggregation;
   highlighted: boolean;
+  label?: string;
   format?: MetricFormat;
   target?: boolean;
 };
@@ -40,9 +42,10 @@ export const defaultAppearance: TreeAppearance = {
 };
 
 export const defaultNodeFields: NodeFieldVisibility = {
-  nodeName: true,
+  nodeName: false,
   nodeTitle: true,
   rowCount: true,
+  rowCountFormat: "count",
 };
 
 export const allAggregations: Array<{ value: SummaryAggregation; label: string }> = [
@@ -84,46 +87,63 @@ export function distinctValues(
 }
 
 export function metricLabel(metric: SummaryMetric): string {
+  if (metric.label?.trim()) return metric.label.trim();
   const aggregation = allAggregations.find((item) => item.value === metric.aggregation)?.label;
   return `${aggregation} ${metric.variable}`;
+}
+
+type MetricValue = { value: number | string; modeShare?: number } | null;
+
+function metricValue(dataset: ParsedDataset, rowIndices: number[] | undefined, metric: SummaryMetric): MetricValue {
+  const values = observedValues(dataset, metric.variable, rowIndices);
+  const present = values.filter((value) => value !== null && String(value).trim() !== "");
+  if (metric.aggregation === "missing") return { value: values.length - present.length };
+  if (metric.aggregation === "count") return { value: present.length };
+  if (metric.aggregation === "distinct") return { value: new Set(present.map(String)).size };
+  if (metric.aggregation === "mode") {
+    if (!present.length) return null;
+    const counts = new Map<string, number>();
+    present.forEach((value) => counts.set(String(value), (counts.get(String(value)) ?? 0) + 1));
+    const [label, count] = [...counts.entries()].sort((left, right) => right[1] - left[1])[0];
+    return { value: label, modeShare: count / present.length };
+  }
+  const numbers = present
+    .map((value) => asNumber(value, dataset, metric.variable))
+    .filter((value): value is number => value !== null);
+  if (!numbers.length) return null;
+  if (metric.aggregation === "sum") return { value: numbers.reduce((sum, item) => sum + item, 0) };
+  if (metric.aggregation === "min") return { value: Math.min(...numbers) };
+  if (metric.aggregation === "max") return { value: Math.max(...numbers) };
+  return { value: numbers.reduce((sum, item) => sum + item, 0) / numbers.length };
+}
+
+function percent(value: number): string {
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)}%`;
 }
 
 export function summarizeMetric(
   dataset: ParsedDataset,
   rowIndices: number[] | undefined,
   metric: SummaryMetric,
+  comparisonRowIndices?: number[],
 ): string {
-  const values = observedValues(dataset, metric.variable, rowIndices);
-  const present = values.filter((value) => value !== null && String(value).trim() !== "");
-
-  if (metric.aggregation === "mode") {
-    if (!present.length) return "—";
-    const counts = new Map<string, number>();
-    present.forEach((value) => counts.set(String(value), (counts.get(String(value)) ?? 0) + 1));
-    const [label, count] = [...counts.entries()].sort((left, right) => right[1] - left[1])[0];
-    return metric.format === "percentage"
-      ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(count / present.length * 100)}%`
-      : label;
+  const current = metricValue(dataset, rowIndices, metric);
+  if (!current) return "—";
+  if (metric.format === "percentage") {
+    if (current.modeShare !== undefined) return percent(current.modeShare * 100);
+    if (typeof current.value === "number") return percent(current.value * 100);
   }
-
-  if (metric.aggregation === "missing") return (values.length - present.length).toLocaleString();
-  if (metric.aggregation === "count") return present.length.toLocaleString();
-  if (metric.aggregation === "distinct") {
-    return new Set(present.map(String)).size.toLocaleString();
+  if (metric.format === "compact" && typeof current.value === "number") {
+    return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(current.value);
   }
-
-  const numbers = present
-    .map((value) => asNumber(value, dataset, metric.variable))
-    .filter((value): value is number => value !== null);
-  if (numbers.length === 0) return "—";
-  let value: number;
-  if (metric.aggregation === "sum") value = numbers.reduce((sum, item) => sum + item, 0);
-  else if (metric.aggregation === "min") value = Math.min(...numbers);
-  else if (metric.aggregation === "max") value = Math.max(...numbers);
-  else value = numbers.reduce((sum, item) => sum + item, 0) / numbers.length;
-  return metric.format === "percentage"
-    ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value * 100)}%`
-    : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+  if ((metric.format === "percent_root" || metric.format === "percent_parent") && comparisonRowIndices) {
+    const comparison = metricValue(dataset, comparisonRowIndices, metric);
+    if (typeof current.value !== "number" || typeof comparison?.value !== "number" || comparison.value === 0) return "—";
+    return percent(current.value / comparison.value * 100);
+  }
+  return typeof current.value === "number"
+    ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(current.value)
+    : current.value;
 }
 
 export function buildNodeSummaries(
@@ -134,14 +154,20 @@ export function buildNodeSummaries(
   if (!dataset || metrics.length === 0) return {};
   const activeDataset = dataset;
   const summaries: NodeSummaryMap = {};
-  function visit(node: TreeNode) {
+  const rootIndices = root.rowIndices ?? dataset.rows.map((_, index) => index);
+  function visit(node: TreeNode, parent?: TreeNode) {
     summaries[node.id] = metrics.map((metric) => ({
       id: metric.id,
       label: metricLabel(metric),
-      value: summarizeMetric(activeDataset, node.rowIndices, metric),
+      value: summarizeMetric(
+        activeDataset,
+        node.rowIndices,
+        metric,
+        metric.format === "percent_root" ? rootIndices : metric.format === "percent_parent" ? parent?.rowIndices ?? rootIndices : undefined,
+      ),
       highlighted: metric.highlighted,
     }));
-    node.children.forEach(visit);
+    node.children.forEach((child) => visit(child, node));
   }
   visit(root);
   return summaries;

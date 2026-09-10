@@ -1,23 +1,26 @@
 import { useMemo, useState } from "react";
 
 import { parseLocalizedNumber, type ParsedDataset } from "./dataset";
-import type { ManualSplitResult, TreeNode } from "./domain";
+import { describeTreeSplit, type ManualSplitResult, type TreeNode } from "./domain";
+import type { SplitApplication } from "./split-operations";
 import { requestManualSplit } from "./manual-splits";
 import { distinctValues, isNumericVariable } from "./tree-settings";
 
 type Props = {
   dataset: ParsedDataset;
   node: TreeNode;
-  onApply: (split: ManualSplitResult) => void;
+  feature: string;
+  onBack: () => void;
+  onApply: (split: ManualSplitResult, mode: SplitApplication) => void;
+  onRemoveSplit: () => void;
 };
 
-export function ManualSplitPane({ dataset, node, onApply }: Props) {
-  const features = dataset.columns;
-  const [feature, setFeature] = useState(features[0] ?? "");
-  const [cutpoints, setCutpoints] = useState("");
-  const [categories, setCategories] = useState<string[]>([]);
-  const [includeOther, setIncludeOther] = useState(true);
-  const [treatAsCategories, setTreatAsCategories] = useState(false);
+export function ManualSplitPane({ dataset, node, feature, onBack, onApply, onRemoveSplit }: Props) {
+  const existingManual = node.split?.kind === "manual" && node.split.feature === feature ? node.split : undefined;
+  const [cutpoints, setCutpoints] = useState(existingManual && !existingManual.forceCategorical ? existingManual.values.join(dataset.numberFormats?.[feature] === "comma" ? "; " : ", ") : "");
+  const [categories, setCategories] = useState<string[]>(existingManual?.forceCategorical ? existingManual.values.map(String) : []);
+  const [includeOther, setIncludeOther] = useState(existingManual?.includeOther ?? true);
+  const [treatAsCategories, setTreatAsCategories] = useState(existingManual?.forceCategorical ?? false);
   const [status, setStatus] = useState<"idle" | "loading">("idle");
   const [error, setError] = useState("");
   const inferredNumeric = feature ? isNumericVariable(dataset, feature, node.rowIndices) : false;
@@ -26,14 +29,6 @@ export function ManualSplitPane({ dataset, node, onApply }: Props) {
     () => feature && !numeric ? distinctValues(dataset, feature, node.rowIndices).slice(0, 20) : [],
     [dataset, feature, node.rowIndices, numeric],
   );
-
-  function handleFeature(nextFeature: string) {
-    setFeature(nextFeature);
-    setCutpoints("");
-    setCategories([]);
-    setTreatAsCategories(false);
-    setError("");
-  }
 
   function toggleCategory(value: string) {
     setCategories((current) => current.includes(value)
@@ -65,7 +60,7 @@ export function ManualSplitPane({ dataset, node, onApply }: Props) {
         !numeric,
         includeOther,
       );
-      onApply(result);
+      onApply(result, "replace");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The manual split could not be applied.");
     } finally {
@@ -75,10 +70,19 @@ export function ManualSplitPane({ dataset, node, onApply }: Props) {
 
   return (
     <div className="manual-pane">
-      <label className="field-label" htmlFor="manual-feature">Split variable</label>
-      <select id="manual-feature" value={feature} onChange={(event) => handleFeature(event.target.value)}>
-        {features.map((column) => <option key={column} value={column}>{column}</option>)}
-      </select>
+      <button className="split-back-button" type="button" onClick={onBack}>← All variables</button>
+      {node.split && (
+        <div className="current-split-card">
+          <span>Current split</span>
+          <strong>{describeTreeSplit(node.split)}</strong>
+          <button type="button" onClick={onRemoveSplit}>Remove split and descendants</button>
+        </div>
+      )}
+      <div className="split-detail-heading">
+        <span>Manual split</span>
+        <h3>{feature}</h3>
+        <p>Choose the exact groups or thresholds for this variable.</p>
+      </div>
 
       {inferredNumeric && (
         <label className="toggle-row compact-toggle">
@@ -126,9 +130,31 @@ export function ManualSplitPane({ dataset, node, onApply }: Props) {
       </label>
       {error && <p className="form-error" role="alert">{error}</p>}
       <button className="primary-button" type="button" onClick={handleApply} disabled={status === "loading" || !feature}>
-        {status === "loading" ? "Applying split…" : node.children.length ? "Replace with manual split" : "Apply manual split"}
+        {status === "loading" ? "Applying split…" : node.children.length ? "Replace current split" : "Apply manual split"}
         <span aria-hidden="true">→</span>
       </button>
+      {node.children.length > 0 && (
+        <><button className="secondary-button split-insert-button" type="button" disabled={status === "loading" || !feature} onClick={async () => {
+          const commaDecimals = dataset.numberFormats?.[feature] === "comma";
+          const values = numeric
+            ? cutpoints.split(commaDecimals ? /[;\n]+/ : /[,;\n]+/).map((value) => parseLocalizedNumber(value.trim(), dataset.numberFormats?.[feature])).filter((value): value is number => value !== null)
+            : availableCategories.filter((value) => categories.includes(String(value)));
+          if (!values.length) {
+            setError(numeric ? "Enter at least one numeric cut point." : "Choose at least one category.");
+            return;
+          }
+          setStatus("loading");
+          setError("");
+          try {
+            const result = await requestManualSplit(dataset, node.rowIndices ?? [], feature, values, !numeric, includeOther);
+            onApply(result, "insert");
+          } catch (reason) {
+            setError(reason instanceof Error ? reason.message : "The manual split could not be applied.");
+          } finally {
+            setStatus("idle");
+          }
+        }}>Insert above current split</button><p className="split-action-note">Reapplies the current subtree inside each new child wherever the data supports it.</p></>
+      )}
     </div>
   );
 }

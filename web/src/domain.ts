@@ -65,6 +65,15 @@ export function describeRule(split: SplitCandidate): string {
   return `${split.feature} ${split.operator} ${value}`;
 }
 
+export function describeTreeSplit(split: TreeSplitDefinition): string {
+  if (split.kind === "binary") {
+    const value = typeof split.value === "string" ? `“${split.value}”` : String(split.value);
+    return `${split.feature} ${split.operator} ${value}`;
+  }
+  const values = split.values.map((value) => typeof value === "string" ? `“${value}”` : String(value)).join(", ");
+  return `${split.feature}: ${values}`;
+}
+
 export function applySplit(
   root: TreeNode,
   nodeId: string,

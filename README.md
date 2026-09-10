@@ -1,6 +1,10 @@
-# controltree
+# ControlTree
 
-`controltree` is a small decision-tree toolkit for tabular classification workflows, with support for manual tree-building and automated training workflows.
+**ControlTree** is an interactive decision-tree workbench for exploratory tabular analysis, manual segmentation, automated split recommendations, and client-ready tree visualization.
+
+**[Open the live browser workbench](https://daniel-vital-de-alcantara.github.io/ControlTree/)** · [Releases](https://github.com/daniel-vital-de-alcantara/ControlTree/releases)
+
+The browser workbench runs its current data processing locally in the browser, so uploaded dataset rows do not leave the user's computer.
 
 ## Package layout
 
@@ -13,7 +17,7 @@
 - `src/controltree/rendering.py`: tree rendering and visualization support.
 - `src/controltree/workflow.py`: higher-level orchestration utilities.
 
-## Installation / Running Control Tree
+## Installation / Running ControlTree
 
 For Windows users, each [GitHub Release](https://github.com/daniel-vital-de-alcantara/ControlTree/releases)
 provides two ways to run the browser workbench:
@@ -57,7 +61,7 @@ The package exposes a `load_titanic()` helper backed by `seaborn.load_dataset("t
 
 The repository is set up for Sphinx-based documentation, and the root `README.md` is the canonical package overview.
 
-## Browser workbench prototype
+## Browser workbench
 
 The `web/` directory contains a React workbench for choosing a CSV or Excel
 dataset and building a tree without requiring a target. Manual splits,

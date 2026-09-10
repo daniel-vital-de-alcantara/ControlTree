@@ -39,6 +39,18 @@ virtual environment or downloading dependencies would add failure points
 without adding functionality. In both distributions, dataset rows remain on
 the user's computer.
 
+### Keyboard navigation
+
+ControlTree supports desktop-style keyboard operation in the browser and
+Windows packages. `Tab` and `Shift+Tab` move between the main toolbar, tree,
+view controls, and the open side pane. Arrow keys move within the focused
+region; in the tree they follow parents, children, and siblings. The number
+keys `1` through `9` and `0` open tools in toolbar order. Common commands such
+as save, undo, redo, node search, copy/cut/paste, delete, zoom, and fit-to-view
+use familiar platform shortcuts. Normal typing always takes priority in text,
+number, search, and selection fields. The complete platform-aware reference is
+available from **Guide → Keyboard shortcuts**.
+
 ### Python library development
 
 For Python library development rather than running the workbench:
@@ -59,7 +71,7 @@ The package exposes a `load_titanic()` helper backed by `seaborn.load_dataset("t
 
 ## Documentation
 
-The repository is set up for Sphinx-based documentation, and the root `README.md` is the canonical package overview.
+The repository is set up for Sphinx-based documentation, and the root `README.md` is the canonical package overview. A concise user guide and the live keyboard shortcut reference are also built into the application.
 
 ## Browser workbench
 

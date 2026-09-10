@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import type { ParsedDataset, VariableType } from "./dataset";
 import { inferredVariableType } from "./data-engine";
 import type { TreeNode } from "./domain";
@@ -22,13 +24,16 @@ type Props = {
   onMetricsChange: (metrics: SummaryMetric[]) => void;
   onNodeTitleChange: (title: string) => void;
   onNodeTitleCommit?: (title: string) => void;
+  onNodeTitleCancel?: () => void;
   nodeNameSuggestions?: string[];
   renameRequestId?: number;
   onVariableTypeChange: (variable: string, type: VariableType) => void;
 };
 
-export function TreeSettingsPane({ section, dataset, appearance, nodeFields, metrics, selectedNode, onAppearanceChange, onNodeFieldsChange, onMetricsChange, onNodeTitleChange, onNodeTitleCommit, nodeNameSuggestions = [], renameRequestId = 0, onVariableTypeChange }: Props) {
+export function TreeSettingsPane({ section, dataset, appearance, nodeFields, metrics, selectedNode, onAppearanceChange, onNodeFieldsChange, onMetricsChange, onNodeTitleChange, onNodeTitleCommit, onNodeTitleCancel, nodeNameSuggestions = [], renameRequestId = 0, onVariableTypeChange }: Props) {
   const nodeNameInputRef = useRef<HTMLInputElement>(null);
+  const renameOriginalRef = useRef("");
+  const renameCancelledRef = useRef(false);
 
   useEffect(() => {
     if (!renameRequestId || section !== "metrics" || !selectedNode) return;
@@ -150,15 +155,24 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
                 id="selected-node-name"
                 list="recent-node-names"
                 value={selectedNode.title}
+                onFocus={(event) => { renameOriginalRef.current = event.currentTarget.value; renameCancelledRef.current = false; }}
                 onChange={(event) => onNodeTitleChange(event.target.value)}
-                onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-                onBlur={(event) => {
-                  const title = event.target.value.trim();
-                  if (!title) onNodeTitleChange("Untitled node");
-                  else {
-                    if (title !== event.target.value) onNodeTitleChange(title);
-                    onNodeTitleCommit?.(title);
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    renameCancelledRef.current = true;
+                    onNodeTitleChange(renameOriginalRef.current);
+                    onNodeTitleCancel?.();
+                    event.currentTarget.blur();
                   }
+                }}
+                onBlur={(event) => {
+                  if (renameCancelledRef.current) { renameCancelledRef.current = false; return; }
+                  const title = event.target.value.trim() || "Untitled node";
+                  if (title !== event.target.value) onNodeTitleChange(title);
+                  onNodeTitleCommit?.(title);
                 }}
               />
               <datalist id="recent-node-names">
@@ -289,4 +303,3 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
     </div>
   );
 }
-import { useEffect, useRef } from "react";

@@ -1,7 +1,7 @@
 {
   "name": "controltree-web",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Private, intentional decision-tree workbench",
   "main": "electron/main.cjs",
   "type": "module",

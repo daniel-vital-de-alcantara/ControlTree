@@ -6,12 +6,15 @@ import { defaultNodeFields, type NodeFieldVisibility, type NodeSummaryMap } from
 type Props = {
   node: TreeNode;
   selectedNodeId: string;
+  keyboardFocusedNodeId?: string;
   onSelectNode: (nodeId: string) => void;
+  onKeyboardFocusNode?: (nodeId: string) => void;
   onNodeContextMenu?: (nodeId: string, x: number, y: number) => void;
   summaries?: NodeSummaryMap;
   nodeFields?: NodeFieldVisibility;
   rootSamples?: number;
   parentSamples?: number;
+  depth?: number;
 };
 
 export function rowCountLabel(node: TreeNode, nodeFields: NodeFieldVisibility, rootSamples: number, parentSamples: number): string {
@@ -24,21 +27,31 @@ export function rowCountLabel(node: TreeNode, nodeFields: NodeFieldVisibility, r
   return `${node.samples.toLocaleString()} rows`;
 }
 
-function NodeCard({ node, selected, onSelect, onContextMenu, summaries, nodeFields, rootSamples, parentSamples }: {
+function NodeCard({ node, selected, keyboardFocused, onSelect, onFocus, onContextMenu, summaries, nodeFields, rootSamples, parentSamples, depth }: {
   node: TreeNode;
   selected: boolean;
+  keyboardFocused: boolean;
   onSelect: () => void;
+  onFocus?: () => void;
   onContextMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
   summaries?: NodeSummaryMap;
   nodeFields: NodeFieldVisibility;
   rootSamples: number;
   parentSamples: number;
+  depth: number;
 }) {
   return (
     <button
-      className={`node-card${selected ? " node-card--selected" : ""}`}
+      className={`node-card${selected ? " node-card--selected" : ""}${keyboardFocused ? " node-card--keyboard-focused" : ""}`}
+      data-node-id={node.id}
       onClick={onSelect}
+      onFocus={onFocus}
       onContextMenu={onContextMenu}
+      tabIndex={keyboardFocused ? 0 : -1}
+      role="treeitem"
+      aria-level={depth}
+      aria-selected={selected}
+      aria-expanded={node.children.length ? true : undefined}
       type="button"
     >
       {nodeFields.nodeName && <span className="node-card__eyebrow">{node.id === "root" ? "Root node" : `Node ${node.id}`}</span>}
@@ -54,13 +67,15 @@ function NodeCard({ node, selected, onSelect, onContextMenu, summaries, nodeFiel
   );
 }
 
-export function TreeCanvas({ node, selectedNodeId, onSelectNode, onNodeContextMenu, summaries, nodeFields = defaultNodeFields, rootSamples = node.samples, parentSamples = node.samples }: Props) {
+export function TreeCanvas({ node, selectedNodeId, keyboardFocusedNodeId, onSelectNode, onKeyboardFocusNode, onNodeContextMenu, summaries, nodeFields = defaultNodeFields, rootSamples = node.samples, parentSamples = node.samples, depth = 1 }: Props) {
   return (
-    <div className="tree" aria-label="Decision tree">
+    <div className="tree" role={depth === 1 ? "tree" : "group"} aria-label={depth === 1 ? "Decision tree" : undefined} data-keyboard-region={depth === 1 ? "tree" : undefined}>
       <NodeCard
         node={node}
         selected={node.id === selectedNodeId}
+        keyboardFocused={node.id === (keyboardFocusedNodeId ?? (depth === 1 ? node.id : ""))}
         onSelect={() => onSelectNode(node.id)}
+        onFocus={onKeyboardFocusNode ? () => onKeyboardFocusNode(node.id) : undefined}
         onContextMenu={onNodeContextMenu ? (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -70,6 +85,7 @@ export function TreeCanvas({ node, selectedNodeId, onSelectNode, onNodeContextMe
         nodeFields={nodeFields}
         rootSamples={rootSamples}
         parentSamples={parentSamples}
+        depth={depth}
       />
       {node.children.length > 0 && (
         <div className="tree__split">
@@ -81,12 +97,15 @@ export function TreeCanvas({ node, selectedNodeId, onSelectNode, onNodeContextMe
                 <TreeCanvas
                   node={child}
                   selectedNodeId={selectedNodeId}
+                  keyboardFocusedNodeId={keyboardFocusedNodeId}
                   onSelectNode={onSelectNode}
+                  onKeyboardFocusNode={onKeyboardFocusNode}
                   onNodeContextMenu={onNodeContextMenu}
                   summaries={summaries}
                   nodeFields={nodeFields}
                   rootSamples={rootSamples}
                   parentSamples={node.samples}
+                  depth={depth + 1}
                 />
               </div>
             ))}

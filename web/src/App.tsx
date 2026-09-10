@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type SetStateAction, type WheelEvent as ReactWheelEvent } from "react";
 
 import { DataSetup, type DatasetSelection } from "./DataSetup";
 import { downloadEnrichedCsv } from "./data-export";
@@ -8,6 +8,7 @@ import { DistributionPane } from "./DistributionPane";
 import { createDistributionSnapshot, type DistributionSettings } from "./distribution";
 import { applySplit, describeRule, findTreeNode, renameTreeNode, type ManualSplitResult, type SplitCandidate, type TreeNode } from "./domain";
 import { ManualSplitPane } from "./ManualSplitPane";
+import { isEditableTarget, shortcutForEvent, shortcutLabel, shortcutsByGroup, treeNavigationTarget, type ShortcutId } from "./keyboard-shortcuts";
 import { SpecialSplitPane } from "./SpecialSplitPane";
 import { pickDatasetFile } from "./file-picker";
 import { openPresentationWindow, presentationTree, publishPresentation, type PresentationState } from "./presentation";
@@ -29,7 +30,7 @@ import { visibleTree } from "./tree-visibility";
 
 export default function App() {
   const [selection, setSelection] = useState<DatasetSelection | "demo" | null>(null);
-  const [tree, setTree] = useState<TreeNode>(initialTree);
+  const [tree, setTreeState] = useState<TreeNode>(initialTree);
   const [selectedNodeId, setSelectedNodeId] = useState("root");
   const [selectedSplitId, setSelectedSplitId] = useState(splitCandidates[0].id);
   const [candidateCache, setCandidateCache] = useState<Record<string, SplitCandidate[]>>({});
@@ -65,7 +66,24 @@ export default function App() {
   const [renameRequestId, setRenameRequestId] = useState(0);
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
   const [actionNotice, setActionNotice] = useState("");
+  const [keyboardNodeId, setKeyboardNodeId] = useState("root");
+  const [toolbarFocusIndex, setToolbarFocusIndex] = useState(0);
+  const [viewFocusIndex, setViewFocusIndex] = useState(0);
+  const [helpSection, setHelpSection] = useState<"guide" | "shortcuts">("guide");
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findIndex, setFindIndex] = useState(-1);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLElement>(null);
+  const viewControlsRef = useRef<HTMLDivElement>(null);
+  const inspectorRef = useRef<HTMLElement>(null);
+  const helpRef = useRef<HTMLElement>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const undoStackRef = useRef<Array<{ tree: TreeNode; nodeNames: string[] }>>([]);
+  const redoStackRef = useRef<Array<{ tree: TreeNode; nodeNames: string[] }>>([]);
+  const renameStartRef = useRef<TreeNode | null>(null);
+  const modalReturnFocusRef = useRef<HTMLElement | null>(null);
   const dataSourceInputRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<{
     pointerId: number;
@@ -112,6 +130,13 @@ export default function App() {
     [tree, uploadedDataset, summaryMetrics],
   );
   const canvasTree = useMemo(() => visibleTree(tree, focusNodeId, collapsedNodeIds), [tree, focusNodeId, collapsedNodeIds]);
+  const findMatches = useMemo(() => {
+    const nodes: TreeNode[] = [];
+    const visit = (node: TreeNode) => { nodes.push(node); node.children.forEach(visit); };
+    visit(tree);
+    const query = findQuery.trim().toLocaleLowerCase();
+    return query ? nodes.filter((node) => node.title.toLocaleLowerCase().includes(query) || node.id.toLocaleLowerCase().includes(query) || node.branchLabel?.toLocaleLowerCase().includes(query)) : nodes;
+  }, [tree, findQuery]);
   const presentationDistribution = useMemo(() => {
     if (!showDistributionInPresentation || !uploadedDataset || !selectedNode || !activeDistributionSettings) return undefined;
     return createDistributionSnapshot(uploadedDataset, selectedNode, activeDistributionSettings, targetSettings.useForDistribution ? recommendationTarget : null);
@@ -129,6 +154,210 @@ export default function App() {
       distribution: presentationDistribution,
     };
   }, [selection, canvasTree, appearance, nodeFields, nodeSummaries, summaryMetrics.length, presentationDistribution, recommendationTarget]);
+
+  function setTree(action: SetStateAction<TreeNode>) {
+    const next = typeof action === "function" ? action(tree) : action;
+    if (next === tree) return;
+    undoStackRef.current = [...undoStackRef.current.slice(-49), { tree, nodeNames: nodeNameHistory }];
+    redoStackRef.current = [];
+    setTreeState(next);
+  }
+
+  function replaceTree(next: TreeNode) {
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    renameStartRef.current = null;
+    setTreeState(next);
+    setKeyboardNodeId(next.id);
+  }
+
+  function undoTree() {
+    const previous = undoStackRef.current.at(-1);
+    if (!previous) { setActionNotice("Nothing to undo."); return; }
+    undoStackRef.current = undoStackRef.current.slice(0, -1);
+    redoStackRef.current = [...redoStackRef.current.slice(-49), { tree, nodeNames: nodeNameHistory }];
+    setTreeState(previous.tree);
+    setNodeNameHistory(previous.nodeNames);
+    const nextSelected = findTreeNode(previous.tree, selectedNodeId)?.id ?? previous.tree.id;
+    setSelectedNodeId(nextSelected);
+    setKeyboardNodeId(nextSelected);
+    setActionNotice("Tree edit undone.");
+  }
+
+  function redoTree() {
+    const next = redoStackRef.current.at(-1);
+    if (!next) { setActionNotice("Nothing to redo."); return; }
+    redoStackRef.current = redoStackRef.current.slice(0, -1);
+    undoStackRef.current = [...undoStackRef.current.slice(-49), { tree, nodeNames: nodeNameHistory }];
+    setTreeState(next.tree);
+    setNodeNameHistory(next.nodeNames);
+    const nextSelected = findTreeNode(next.tree, selectedNodeId)?.id ?? next.tree.id;
+    setSelectedNodeId(nextSelected);
+    setKeyboardNodeId(nextSelected);
+    setActionNotice("Tree edit redone.");
+  }
+
+  function focusNodeCard(nodeId: string) {
+    setKeyboardNodeId(nodeId);
+    window.requestAnimationFrame(() => canvasRef.current?.querySelector<HTMLElement>(`.node-card[data-node-id="${CSS.escape(nodeId)}"]`)?.focus());
+  }
+
+  function fitTreeToView() {
+    const canvas = canvasRef.current;
+    const treeElement = canvas?.querySelector<HTMLElement>(".canvas__tree-origin > .tree");
+    if (!canvas || !treeElement) return;
+    const scale = Math.min(1.5, Math.max(.35, Math.min((canvas.clientWidth - 80) / treeElement.offsetWidth, (canvas.clientHeight - 150) / treeElement.offsetHeight)));
+    setViewport({ x: canvas.clientWidth / 2 * (1 - scale), y: Math.max(72, (canvas.clientHeight - treeElement.offsetHeight * scale) / 2) - 88 * scale, scale });
+  }
+
+  function focusMajorRegion(direction: 1 | -1) {
+    const toolbarTarget = toolbarRef.current?.querySelector<HTMLElement>(`[data-toolbar-index="${toolbarFocusIndex}"]:not(:disabled)`) ?? toolbarRef.current?.querySelector<HTMLElement>(".toolbar-button:not(:disabled)");
+    const treeTarget = canvasRef.current?.querySelector<HTMLElement>(`.node-card[data-node-id="${CSS.escape(keyboardNodeId)}"]`) ?? canvasRef.current?.querySelector<HTMLElement>(".node-card");
+    const viewTarget = viewControlsRef.current?.querySelector<HTMLElement>(`[data-view-index="${viewFocusIndex}"]`);
+    const panelTarget = inspectorOpen ? inspectorRef.current : helpOpen ? helpRef.current : null;
+    const regions = [toolbarTarget, treeTarget, viewTarget, panelTarget].filter((item): item is HTMLElement => Boolean(item));
+    if (!regions.length) return;
+    const active = document.activeElement as HTMLElement | null;
+    let index = regions.findIndex((element) => element === active || element.closest("[data-keyboard-region]") === active?.closest("[data-keyboard-region]"));
+    if (index < 0) index = direction > 0 ? -1 : 0;
+    regions[(index + direction + regions.length) % regions.length].focus();
+  }
+
+  function handleRovingKeys(event: ReactKeyboardEvent<HTMLElement>, selector: string, current: number, setCurrent: (index: number) => void) {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+    const items = [...event.currentTarget.querySelectorAll<HTMLElement>(selector)].filter((item) => !item.matches(":disabled"));
+    if (!items.length) return;
+    event.preventDefault();
+    const activeIndex = Math.max(0, items.findIndex((item) => item === document.activeElement));
+    const nextIndex = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (activeIndex + (event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
+    const originalIndex = Number(items[nextIndex].dataset.toolbarIndex ?? items[nextIndex].dataset.viewIndex ?? current);
+    setCurrent(originalIndex);
+    items[nextIndex].focus();
+  }
+
+  function handleTreeKeys(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (isEditableTarget(event.target)) return;
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+      event.preventDefault();
+      const next = treeNavigationTarget(canvasTree, keyboardNodeId, event.key as "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight");
+      focusNodeCard(next);
+    }
+  }
+
+  function focusInspectorControl(direction: 1 | -1) {
+    const panel = inspectorOpen ? inspectorRef.current : helpOpen ? helpRef.current : null;
+    if (!panel) return;
+    const controls = [...panel.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [contenteditable='true']")];
+    if (!controls.length) return;
+    const index = controls.findIndex((control) => control === document.activeElement);
+    controls[(index + direction + controls.length) % controls.length].focus();
+  }
+
+  function activateTool(index: number) {
+    if ((index === 0 || index === 3 || index === 4) && !uploadedDataset) { setActionNotice("Upload a dataset to use this tool."); return; }
+    setToolbarFocusIndex(index);
+    const actions = [toggleTarget, toggleMetrics, toggleSplit, toggleDistribution, toggleTest, toggleVariableTypes, toggleTreeSettings, togglePresentActions, toggleGuide, toggleMoreActions];
+    actions[index]?.();
+    window.requestAnimationFrame(() => (index === 8 ? helpRef.current : inspectorRef.current)?.focus());
+  }
+
+  function chooseFindResult(direction: 1 | -1 = 1) {
+    if (!findMatches.length) return;
+    const nextIndex = findIndex < 0
+      ? direction > 0 ? 0 : findMatches.length - 1
+      : (findIndex + direction + findMatches.length) % findMatches.length;
+    const match = findMatches[nextIndex];
+    setFindIndex(nextIndex);
+    setSelectedNodeId(match.id);
+    setKeyboardNodeId(match.id);
+    setFocusNodeId(null);
+    setCollapsedNodeIds((current) => current.filter((id) => !match.id.startsWith(`${id}.`)));
+    window.requestAnimationFrame(() => focusNodeCard(match.id));
+  }
+
+  async function runShortcut(id: ShortcutId) {
+    const node = findTreeNode(tree, selectedNodeId || keyboardNodeId);
+    if (id.startsWith("tool-")) { activateTool(["tool-target", "tool-metrics", "tool-split", "tool-distribution", "tool-test", "tool-variables", "tool-tree", "tool-present", "tool-guide", "tool-more"].indexOf(id)); return; }
+    if (id === "undo") { undoTree(); return; }
+    if (id === "redo") { redoTree(); return; }
+    if (id === "save") { await handleSave(); return; }
+    if (id === "find") { setFindOpen(true); setFindIndex(-1); window.requestAnimationFrame(() => findInputRef.current?.focus()); return; }
+    if (id === "zoom-in") { zoomAt(viewport.scale * 1.2); return; }
+    if (id === "zoom-out") { zoomAt(viewport.scale / 1.2); return; }
+    if (id === "fit") { fitTreeToView(); return; }
+    if (id === "select-all") { setSelectedNodeId(tree.id); focusNodeCard(tree.id); setActionNotice("The whole tree is selected through its root node."); return; }
+    if (id === "activate") { if (node) selectNode(node.id); return; }
+    if (id === "context-menu" && node) {
+      const card = canvasRef.current?.querySelector<HTMLElement>(`.node-card[data-node-id="${CSS.escape(node.id)}"]`);
+      const rect = card?.getBoundingClientRect();
+      openNodeContextMenu(node.id, rect?.left ?? 20, rect?.bottom ?? 80);
+      return;
+    }
+    if (id === "copy") { if (node?.split) await copyContextSplits(node, "subtree"); else setActionNotice("The selected node has no split to copy."); return; }
+    if (id === "cut") { if (node?.split) { await copyContextSplits(node, "subtree"); setTree((current) => removeNodeSplit(current, node.id)); setActionNotice("Split subtree cut to the clipboard."); } else setActionNotice("The selected node has no split to cut."); return; }
+    if (id === "paste") { if (node && uploadedDataset) await pasteContextSplits(node.id); else setActionNotice("Paste is available for nodes backed by uploaded data."); return; }
+    if (id === "delete") {
+      if (!node?.split) { setActionNotice("The selected node has no split to remove."); return; }
+      trimContextNode(node.id);
+    }
+  }
+
+  useEffect(() => {
+    if (!findTreeNode(canvasTree, keyboardNodeId)) setKeyboardNodeId(canvasTree.id);
+  }, [canvasTree, keyboardNodeId]);
+
+  useEffect(() => {
+    const panels = [inspectorRef.current, helpRef.current];
+    panels.forEach((panel) => panel?.querySelectorAll<HTMLElement>("button, a[href], input, select, textarea, [contenteditable='true']").forEach((control) => { control.tabIndex = -1; }));
+  });
+
+  useEffect(() => {
+    function handleGlobalKeyboard(event: KeyboardEvent) {
+      if (!selection) return;
+      if (presentHere) return;
+      if (homeWarningOpen) {
+        if (event.key === "Escape") { event.preventDefault(); setHomeWarningOpen(false); window.requestAnimationFrame(() => modalReturnFocusRef.current?.focus()); }
+        return;
+      }
+      if (contextMenu) {
+        if (event.key === "Escape") { event.preventDefault(); setContextMenu(null); focusNodeCard(contextMenu.nodeId); }
+        if (event.key === "Tab") { event.preventDefault(); setContextMenu(null); focusMajorRegion(event.shiftKey ? -1 : 1); }
+        return;
+      }
+      if (event.key === "Tab") { event.preventDefault(); focusMajorRegion(event.shiftKey ? -1 : 1); return; }
+      if (findOpen && event.key === "Escape") { event.preventDefault(); setFindOpen(false); focusNodeCard(keyboardNodeId); return; }
+      if (isEditableTarget(event.target) && event.key === "Escape") {
+        event.preventDefault();
+        (event.target as HTMLElement).blur();
+        (inspectorOpen ? inspectorRef.current : helpOpen ? helpRef.current : null)?.focus();
+        return;
+      }
+      const inTree = Boolean((document.activeElement as HTMLElement | null)?.closest("[data-keyboard-region='tree']"));
+      const shortcut = shortcutForEvent(event, inTree ? "tree" : "editor");
+      if (!shortcut) return;
+      if (shortcut.id === "escape") {
+        event.preventDefault();
+        if (findOpen) setFindOpen(false);
+        else if (helpOpen) {
+          setHelpOpen(false);
+          setToolbarFocusIndex(8);
+          window.requestAnimationFrame(() => toolbarRef.current?.querySelector<HTMLElement>("[data-toolbar-index='8']")?.focus());
+        } else if (inspectorOpen) {
+          setInspectorOpen(false);
+          if (sidebarMode === "node" || sidebarMode === "test" || sidebarMode === "metrics") setSelectedNodeId("");
+          window.requestAnimationFrame(() => toolbarRef.current?.querySelector<HTMLElement>(`[data-toolbar-index="${toolbarFocusIndex}"]`)?.focus());
+        } else {
+          setSelectedNodeId("");
+          focusNodeCard(canvasTree.id);
+        }
+        return;
+      }
+      event.preventDefault();
+      void runShortcut(shortcut.id);
+    }
+    window.addEventListener("keydown", handleGlobalKeyboard);
+    return () => window.removeEventListener("keydown", handleGlobalKeyboard);
+  });
 
   useEffect(() => {
     if (!selection || selection === "demo") return;
@@ -239,6 +468,10 @@ export default function App() {
     }
     window.addEventListener("pointerdown", closeContextMenu);
     window.addEventListener("keydown", closeOnEscape);
+    window.requestAnimationFrame(() => {
+      contextMenuRef.current?.querySelectorAll<HTMLButtonElement>("button").forEach((button) => { button.tabIndex = -1; });
+      contextMenuRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    });
     return () => {
       window.removeEventListener("pointerdown", closeContextMenu);
       window.removeEventListener("keydown", closeOnEscape);
@@ -333,7 +566,7 @@ export default function App() {
     });
     setShowDistributionInPresentation(false);
     setSelection(selectionValue);
-    setTree({
+    replaceTree({
       id: "root",
       title: "All rows",
       samples: selectionValue.dataset.rows.length,
@@ -346,6 +579,7 @@ export default function App() {
     setViewport({ x: 0, y: 0, scale: 1 });
     setProjectFileName("Untitled tree");
     setSavedProjectFingerprint(null);
+    setToolbarFocusIndex(0);
   }
 
   async function handleResume(selectionValue: DatasetSelection, project: ControlTreeProject, savedFileName: string) {
@@ -370,7 +604,7 @@ export default function App() {
     }));
     setCandidateCache({});
     setSelection(configuredSelection);
-    setTree(restoredTree);
+    replaceTree(restoredTree);
     setAppearance(project.appearance);
     setNodeFields(project.nodeFields);
     setTargetError("");
@@ -459,7 +693,7 @@ export default function App() {
     setNodeFields(defaultNodeFields);
     setTargetSettings(defaultTargetSettings);
     setSelection("demo");
-    setTree(initialTree);
+    replaceTree(initialTree);
     setSelectedSplitId(splitCandidates[0].id);
     setSelectedNodeId("");
     setDistributionSettings(null);
@@ -468,6 +702,7 @@ export default function App() {
     setViewport({ x: 0, y: 0, scale: 1 });
     setProjectFileName("Untitled tree");
     setSavedProjectFingerprint(null);
+    setToolbarFocusIndex(1);
   }
 
   if (!selection) {
@@ -511,6 +746,7 @@ export default function App() {
   const contextNode = contextMenu ? findTreeNode(tree, contextMenu.nodeId) : undefined;
 
   function selectNode(nodeId: string) {
+    setKeyboardNodeId(nodeId);
     if (inspectorOpen && (sidebarMode === "test" || sidebarMode === "metrics")) {
       setSelectedNodeId(nodeId);
       setHelpOpen(false);
@@ -545,6 +781,30 @@ export default function App() {
 
   function rememberNodeName(title: string) {
     setNodeNameHistory((current) => [title, ...current.filter((name) => name.toLocaleLowerCase() !== title.toLocaleLowerCase())].slice(0, 10));
+  }
+
+  function handleNodeTitleChange(title: string) {
+    if (!selectedNodeId) return;
+    if (!renameStartRef.current) renameStartRef.current = tree;
+    setTreeState((current) => renameTreeNode(current, selectedNodeId, title));
+  }
+
+  function handleNodeTitleCommit(title: string) {
+    if (!selectedNodeId) return;
+    const finalTree = renameTreeNode(tree, selectedNodeId, title);
+    const original = renameStartRef.current;
+    if (original && findTreeNode(original, selectedNodeId)?.title !== title) {
+      undoStackRef.current = [...undoStackRef.current.slice(-49), { tree: original, nodeNames: nodeNameHistory }];
+      redoStackRef.current = [];
+    }
+    renameStartRef.current = null;
+    setTreeState(finalTree);
+    rememberNodeName(title);
+  }
+
+  function handleNodeTitleCancel() {
+    if (renameStartRef.current) setTreeState(renameStartRef.current);
+    renameStartRef.current = null;
   }
 
   async function copyContextSplits(node: TreeNode, mode: "single" | "subtree") {
@@ -675,6 +935,14 @@ export default function App() {
       setSidebarMode("present");
       setSelectedNodeId("");
     }
+  }
+
+  function toggleGuide() {
+    const active = helpOpen;
+    setHelpOpen(!active);
+    setInspectorOpen(false);
+    setSelectedNodeId("");
+    if (!active) setHelpSection("guide");
   }
 
   async function handleTreeImageDownload() {
@@ -841,7 +1109,7 @@ export default function App() {
         sourceFileName: dataset.fileName,
       });
       setSelection({ dataset: configuredDataset, recommendationTarget });
-      setTree(replayedTree);
+      replaceTree(replayedTree);
       setCandidateCache({});
       setSelectedSplitId("");
       setSelectedNodeId("");
@@ -876,6 +1144,7 @@ export default function App() {
 
   function handleGoHome() {
     if (isDirty) {
+      modalReturnFocusRef.current = document.activeElement as HTMLElement | null;
       setHomeWarningOpen(true);
       return;
     }
@@ -911,54 +1180,64 @@ export default function App() {
   return (
     <div className="app-shell app-shell--workspace">
       <div className="workspace-context" aria-label="Current project">
-        <a className="brand" href="#" aria-label="Return to the ControlTree home screen" onClick={(event) => { event.preventDefault(); handleGoHome(); }}>
+        <a className="brand" href="#" tabIndex={-1} aria-label="Return to the ControlTree home screen" onClick={(event) => { event.preventDefault(); handleGoHome(); }}>
           <span className="brand__mark" aria-hidden="true">⌁</span>
           <span>ControlTree</span>
         </a>
         <span className="workspace-context__divider" />
-        <button className={`workspace-project${isDirty ? " workspace-project--dirty" : ""}`} type="button" onClick={handleSave} aria-label={`Save ${projectFileName}; ${isDirty ? "unsaved changes" : "currently saved"}`}>
+        <button className={`workspace-project${isDirty ? " workspace-project--dirty" : ""}`} tabIndex={-1} type="button" onClick={handleSave} aria-label={`Save ${projectFileName}; ${isDirty ? "unsaved changes" : "currently saved"}`}>
           <span aria-hidden="true">●</span>
           <strong>{projectFileName}</strong>
           <small>{isDirty ? "Unsaved changes" : "Saved"}</small>
         </button>
       </div>
 
-      <nav className="workspace-actions" aria-label="ControlTree actions">
-        <button className={`toolbar-button${inspectorOpen && sidebarMode === "target" ? " toolbar-button--selected" : ""}${uploadedDataset && !recommendationTarget && !targetSettings.dismissTargetReminder ? " toolbar-button--attention" : ""}`} type="button" disabled={!uploadedDataset} data-tooltip={uploadedDataset ? recommendationTarget ? "Target variable" : targetSettings.dismissTargetReminder ? "No target selected" : "Choose a target variable" : "Target is available with uploaded data"} aria-label={recommendationTarget ? "Target variable" : targetSettings.dismissTargetReminder ? "No target selected" : "Choose a target variable"} onClick={toggleTarget}>
+      <nav ref={toolbarRef} className="workspace-actions keyboard-region" data-keyboard-region="tools" role="toolbar" aria-label="ControlTree tools" onKeyDown={(event) => handleRovingKeys(event, ".toolbar-button", toolbarFocusIndex, setToolbarFocusIndex)}>
+        <button data-toolbar-index="0" tabIndex={toolbarFocusIndex === 0 ? 0 : -1} onFocus={() => setToolbarFocusIndex(0)} className={`toolbar-button${inspectorOpen && sidebarMode === "target" ? " toolbar-button--selected" : ""}${uploadedDataset && !recommendationTarget && !targetSettings.dismissTargetReminder ? " toolbar-button--attention" : ""}`} type="button" disabled={!uploadedDataset} data-tooltip={uploadedDataset ? recommendationTarget ? "1 · Target variable" : targetSettings.dismissTargetReminder ? "1 · No target selected" : "1 · Choose a target variable" : "1 · Target is available with uploaded data"} aria-label={recommendationTarget ? "Target variable" : targetSettings.dismissTargetReminder ? "No target selected" : "Choose a target variable"} onClick={toggleTarget}>
           <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><path d="m15 9 6-6M17 3h4v4"/></svg>
         </button>
-        <button className={`toolbar-button${inspectorOpen && sidebarMode === "metrics" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="Metrics" aria-label="Metrics" onClick={toggleMetrics}>
+        <button data-toolbar-index="1" tabIndex={toolbarFocusIndex === 1 ? 0 : -1} onFocus={() => setToolbarFocusIndex(1)} className={`toolbar-button${inspectorOpen && sidebarMode === "metrics" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="2 · Metrics" aria-label="Metrics" onClick={toggleMetrics}>
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 5H8l6 7-6 7h10M4 5h1M4 12h1M4 19h1"/></svg>
         </button>
-        <button className={`toolbar-button${inspectorOpen && sidebarMode === "node" && nodeTab !== "distribution" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="Split" aria-label="Open split tools" onClick={toggleSplit}>
+        <button data-toolbar-index="2" tabIndex={toolbarFocusIndex === 2 ? 0 : -1} onFocus={() => setToolbarFocusIndex(2)} className={`toolbar-button${inspectorOpen && sidebarMode === "node" && nodeTab !== "distribution" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="3 · Split" aria-label="Open split tools" onClick={toggleSplit}>
           <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="5" rx="1"/><rect x="2" y="16" width="8" height="5" rx="1"/><rect x="14" y="16" width="8" height="5" rx="1"/><path d="M12 8v4M6 12h12M6 12v4M18 12v4"/></svg>
         </button>
-        <button className={`toolbar-button${inspectorOpen && sidebarMode === "node" && nodeTab === "distribution" ? " toolbar-button--selected" : ""}`} type="button" disabled={!uploadedDataset} data-tooltip={uploadedDataset ? "Distribution" : "Upload data to use Distribution"} aria-label="Open distribution" onClick={toggleDistribution}>
+        <button data-toolbar-index="3" tabIndex={toolbarFocusIndex === 3 ? 0 : -1} onFocus={() => setToolbarFocusIndex(3)} className={`toolbar-button${inspectorOpen && sidebarMode === "node" && nodeTab === "distribution" ? " toolbar-button--selected" : ""}`} type="button" disabled={!uploadedDataset} data-tooltip={uploadedDataset ? "4 · Distribution" : "4 · Upload data to use Distribution"} aria-label="Open distribution" onClick={toggleDistribution}>
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 20V10M9.3 20V5M14.7 20v-8M20 20V8M2 20h20"/></svg>
         </button>
-        <button className={`toolbar-button${inspectorOpen && sidebarMode === "test" ? " toolbar-button--selected" : ""}`} type="button" disabled={!uploadedDataset} data-tooltip={uploadedDataset ? "Test tree" : "Upload data to test the tree"} aria-label="Test tree" onClick={toggleTest}>
+        <button data-toolbar-index="4" tabIndex={toolbarFocusIndex === 4 ? 0 : -1} onFocus={() => setToolbarFocusIndex(4)} className={`toolbar-button${inspectorOpen && sidebarMode === "test" ? " toolbar-button--selected" : ""}`} type="button" disabled={!uploadedDataset} data-tooltip={uploadedDataset ? "5 · Test tree" : "5 · Upload data to test the tree"} aria-label="Test tree" onClick={toggleTest}>
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M8 15h8"/></svg>
         </button>
-        <button className={`toolbar-button${inspectorOpen && sidebarMode === "variables" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="Variable types" aria-label="Variable types" onClick={toggleVariableTypes}>
+        <button data-toolbar-index="5" tabIndex={toolbarFocusIndex === 5 ? 0 : -1} onFocus={() => setToolbarFocusIndex(5)} className={`toolbar-button${inspectorOpen && sidebarMode === "variables" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="6 · Variable types" aria-label="Variable types" onClick={toggleVariableTypes}>
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 19 8 5l5 14M5 14h6M15 7h6M18 5v14"/></svg>
         </button>
-        <button className={`toolbar-button${inspectorOpen && sidebarMode === "tree" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="Tree settings" aria-label="Tree settings" onClick={toggleTreeSettings}>
+        <button data-toolbar-index="6" tabIndex={toolbarFocusIndex === 6 ? 0 : -1} onFocus={() => setToolbarFocusIndex(6)} className={`toolbar-button${inspectorOpen && sidebarMode === "tree" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="7 · Tree settings" aria-label="Tree settings" onClick={toggleTreeSettings}>
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6"/><circle cx="14" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
         </button>
-        <button className={`toolbar-button${inspectorOpen && sidebarMode === "present" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="Present tree" aria-label="Present tree" onClick={togglePresentActions}>
+        <button data-toolbar-index="7" tabIndex={toolbarFocusIndex === 7 ? 0 : -1} onFocus={() => setToolbarFocusIndex(7)} className={`toolbar-button${inspectorOpen && sidebarMode === "present" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="8 · Present tree" aria-label="Present tree" onClick={togglePresentActions}>
           <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4M10 8l5 2.5-5 2.5z"/></svg>
         </button>
-        <button className={`toolbar-button${helpOpen ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="ControlTree guide" aria-label="Open the ControlTree guide" onClick={() => { setHelpOpen((open) => !open); setInspectorOpen(false); setSelectedNodeId(""); }}>
+        <button data-toolbar-index="8" tabIndex={toolbarFocusIndex === 8 ? 0 : -1} onFocus={() => setToolbarFocusIndex(8)} className={`toolbar-button${helpOpen ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="9 · ControlTree guide" aria-label="Open the ControlTree guide" onClick={toggleGuide}>
           <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5.5A3.5 3.5 0 0 1 7.5 2H12v18H7.5A3.5 3.5 0 0 0 4 23zM20 5.5A3.5 3.5 0 0 0 16.5 2H12v18h4.5A3.5 3.5 0 0 1 20 23z"/></svg>
         </button>
-        <button className={`toolbar-button${inspectorOpen && sidebarMode === "more" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="More actions" aria-label="More actions" onClick={toggleMoreActions}>
+        <button data-toolbar-index="9" tabIndex={toolbarFocusIndex === 9 ? 0 : -1} onFocus={() => setToolbarFocusIndex(9)} className={`toolbar-button${inspectorOpen && sidebarMode === "more" ? " toolbar-button--selected" : ""}`} type="button" data-tooltip="0 · More actions" aria-label="More actions" onClick={toggleMoreActions}>
           <svg className="toolbar-dots-icon" aria-hidden="true" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
         </button>
       </nav>
 
-      <input ref={dataSourceInputRef} className="file-input" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleDataSourceInput} />
+      <input ref={dataSourceInputRef} tabIndex={-1} className="file-input" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleDataSourceInput} />
 
       <main id="workspace" className="workspace">
+        {findOpen && <div className="node-find" role="search" aria-label="Find a tree node">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/></svg>
+          <input ref={findInputRef} tabIndex={-1} value={findQuery} onChange={(event) => { setFindQuery(event.target.value); setFindIndex(-1); }} onKeyDown={(event) => {
+            if (event.key === "Enter") { event.preventDefault(); chooseFindResult(event.shiftKey ? -1 : 1); }
+          }} placeholder="Find node name, ID, or branch…" aria-label="Find node" />
+          <span>{findMatches.length ? findIndex >= 0 ? `${findIndex + 1} / ${findMatches.length}` : `${findMatches.length} matches` : "No matches"}</span>
+          <button tabIndex={-1} type="button" onClick={() => chooseFindResult(-1)} disabled={!findMatches.length} aria-label="Previous matching node">↑</button>
+          <button tabIndex={-1} type="button" onClick={() => chooseFindResult(1)} disabled={!findMatches.length} aria-label="Next matching node">↓</button>
+          <button tabIndex={-1} type="button" onClick={() => { setFindOpen(false); focusNodeCard(keyboardNodeId); }} aria-label="Close node search">×</button>
+        </div>}
         {dataSourceError && <div className="workspace-error" role="alert"><span>{dataSourceError}</span><button type="button" onClick={() => setDataSourceError("")} aria-label="Dismiss message">×</button></div>}
         {actionNotice && <div className="workspace-notice" role="status">{actionNotice}</div>}
         <section className="canvas-panel">
@@ -971,6 +1250,7 @@ export default function App() {
             onPointerMove={handleCanvasPointerMove}
             onPointerUp={finishCanvasPointer}
             onPointerCancel={finishCanvasPointer}
+            onKeyDown={handleTreeKeys}
           >
             <div className="canvas__grid" />
             <div className="canvas__camera" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` }}>
@@ -978,7 +1258,9 @@ export default function App() {
                 <TreeCanvas
                   node={canvasTree}
                   selectedNodeId={selectedNodeId}
+                  keyboardFocusedNodeId={keyboardNodeId}
                   onSelectNode={selectNode}
+                  onKeyboardFocusNode={setKeyboardNodeId}
                   onNodeContextMenu={openNodeContextMenu}
                   summaries={nodeSummaries}
                   nodeFields={nodeFields}
@@ -986,23 +1268,29 @@ export default function App() {
                 />
               </div>
             </div>
-            <div className="canvas-controls" aria-label="Canvas controls">
-              <button type="button" onClick={() => zoomAt(viewport.scale / 1.2)} aria-label="Zoom out">−</button>
+            <div ref={viewControlsRef} className="canvas-controls keyboard-region" data-keyboard-region="view" role="toolbar" aria-label="Canvas view controls" onKeyDown={(event) => handleRovingKeys(event, "button", viewFocusIndex, setViewFocusIndex)}>
+              <button data-view-index="0" tabIndex={viewFocusIndex === 0 ? 0 : -1} onFocus={() => setViewFocusIndex(0)} type="button" onClick={() => zoomAt(viewport.scale / 1.2)} aria-label="Zoom out">−</button>
               <span>{Math.round(viewport.scale * 100)}%</span>
-              <button type="button" onClick={() => zoomAt(viewport.scale * 1.2)} aria-label="Zoom in">+</button>
-              <button type="button" onClick={() => setViewport({ x: 0, y: 0, scale: 1 })}>Reset view</button>
+              <button data-view-index="1" tabIndex={viewFocusIndex === 1 ? 0 : -1} onFocus={() => setViewFocusIndex(1)} type="button" onClick={() => zoomAt(viewport.scale * 1.2)} aria-label="Zoom in">+</button>
+              <button data-view-index="2" tabIndex={viewFocusIndex === 2 ? 0 : -1} onFocus={() => setViewFocusIndex(2)} type="button" onClick={fitTreeToView}>Fit tree</button>
+              <button data-view-index="3" tabIndex={viewFocusIndex === 3 ? 0 : -1} onFocus={() => setViewFocusIndex(3)} type="button" onClick={() => setViewport({ x: 0, y: 0, scale: 1 })}>Reset view</button>
             </div>
           </div>
         </section>
 
-        <aside className={`inspector${inspectorOpen ? " inspector--open" : ""}`} style={{ "--pane-width": `${paneWidth}px` } as CSSProperties} aria-label="Tool pane" aria-hidden={!inspectorOpen}>
+        <aside ref={inspectorRef} tabIndex={inspectorOpen ? 0 : -1} data-keyboard-region="inspector" className={`inspector keyboard-region${inspectorOpen ? " inspector--open" : ""}`} style={{ "--pane-width": `${paneWidth}px` } as CSSProperties} aria-label="Tool pane" aria-hidden={!inspectorOpen} onKeyDown={(event) => {
+          if (isEditableTarget(event.target)) return;
+          if (event.key === "ArrowDown" || event.key === "ArrowRight") { event.preventDefault(); focusInspectorControl(1); }
+          if (event.key === "ArrowUp" || event.key === "ArrowLeft") { event.preventDefault(); focusInspectorControl(-1); }
+          if (event.key === "Enter" && event.target === event.currentTarget) { event.preventDefault(); focusInspectorControl(1); }
+        }}>
           <div className="pane-resize-handle" role="separator" aria-label="Resize tool pane" aria-orientation="vertical" onPointerDown={startPaneResize} onPointerMove={movePaneResize} onPointerUp={finishPaneResize} onPointerCancel={finishPaneResize} />
           <div className="inspector__toolbar">
             <div>
               <strong>{inspectorCopy.title}</strong>
               <p>{inspectorCopy.description}</p>
             </div>
-            <button className="inspector__close" type="button" onClick={() => { setInspectorOpen(false); if (sidebarMode === "node" || sidebarMode === "test" || sidebarMode === "metrics") setSelectedNodeId(""); setNodeTab("recommended"); }} aria-label="Close inspector">×</button>
+            <button className="inspector__close" type="button" onClick={() => { setInspectorOpen(false); if (sidebarMode === "node" || sidebarMode === "test" || sidebarMode === "metrics") setSelectedNodeId(""); setNodeTab("recommended"); window.requestAnimationFrame(() => toolbarRef.current?.querySelector<HTMLElement>(`[data-toolbar-index="${toolbarFocusIndex}"]`)?.focus()); }} aria-label="Close inspector">×</button>
           </div>
 
           {sidebarMode === "target" ? (
@@ -1081,8 +1369,9 @@ export default function App() {
               onAppearanceChange={setAppearance}
               onNodeFieldsChange={setNodeFields}
               onMetricsChange={setSummaryMetrics}
-              onNodeTitleChange={(title) => selectedNodeId && setTree((current) => renameTreeNode(current, selectedNodeId, title))}
-              onNodeTitleCommit={rememberNodeName}
+              onNodeTitleChange={handleNodeTitleChange}
+              onNodeTitleCommit={handleNodeTitleCommit}
+              onNodeTitleCancel={handleNodeTitleCancel}
               nodeNameSuggestions={nodeNameHistory}
               renameRequestId={renameRequestId}
               onVariableTypeChange={handleVariableTypeChange}
@@ -1191,7 +1480,14 @@ export default function App() {
         </aside>
 
         {contextMenu && contextNode && (
-          <div className="node-context-menu" role="menu" aria-label={`Actions for ${contextNode.title}`} style={{ left: contextMenu.x, top: contextMenu.y }} onContextMenu={(event) => event.preventDefault()}>
+          <div ref={contextMenuRef} className="node-context-menu" role="menu" aria-label={`Actions for ${contextNode.title}`} style={{ left: contextMenu.x, top: contextMenu.y }} onContextMenu={(event) => event.preventDefault()} onKeyDown={(event) => {
+            if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") return;
+            event.preventDefault();
+            const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+            const current = items.findIndex((item) => item === document.activeElement);
+            const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (current + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
+            items[next]?.focus();
+          }}>
             <div className="node-context-menu__heading"><span>Node {contextNode.id}</span><strong>{contextNode.title}</strong></div>
             <button role="menuitem" type="button" onClick={() => beginContextRename(contextNode.id)}><span>✎</span><span><strong>Rename node</strong><small>Open Metrics and start typing</small></span></button>
             <div className="node-context-menu__separator" />
@@ -1213,23 +1509,43 @@ export default function App() {
           </div>
         )}
 
-        <aside className={`help-drawer${helpOpen ? " help-drawer--open" : ""}`} style={{ "--pane-width": `${paneWidth}px` } as CSSProperties} aria-label="ControlTree guide" aria-hidden={!helpOpen}>
+        <aside ref={helpRef} tabIndex={helpOpen ? 0 : -1} data-keyboard-region="inspector" className={`help-drawer keyboard-region${helpOpen ? " help-drawer--open" : ""}`} style={{ "--pane-width": `${paneWidth}px` } as CSSProperties} aria-label="ControlTree guide" aria-hidden={!helpOpen} onKeyDown={(event) => {
+          if (isEditableTarget(event.target)) return;
+          if (event.key === "ArrowDown" || event.key === "ArrowRight") { event.preventDefault(); focusInspectorControl(1); }
+          if (event.key === "ArrowUp" || event.key === "ArrowLeft") { event.preventDefault(); focusInspectorControl(-1); }
+          if (event.key === "Enter" && event.target === event.currentTarget) { event.preventDefault(); focusInspectorControl(1); }
+        }}>
           <div className="pane-resize-handle" role="separator" aria-label="Resize guide pane" aria-orientation="vertical" onPointerDown={startPaneResize} onPointerMove={movePaneResize} onPointerUp={finishPaneResize} onPointerCancel={finishPaneResize} />
           <div className="inspector__toolbar help-drawer__heading">
-            <div><strong>ControlTree guide</strong><p>Learn the essential controls for building, exploring, saving, and presenting a tree.</p></div>
-            <button className="inspector__close" type="button" onClick={() => setHelpOpen(false)} aria-label="Close guide">×</button>
+            <div><strong>{helpSection === "shortcuts" ? "Keyboard shortcuts" : "ControlTree guide"}</strong><p>{helpSection === "shortcuts" ? "Use ControlTree quickly without losing normal typing behavior." : "Learn the essential controls for building, exploring, saving, and presenting a tree."}</p></div>
+            <button className="inspector__close" type="button" onClick={() => { setHelpOpen(false); setToolbarFocusIndex(8); window.requestAnimationFrame(() => toolbarRef.current?.querySelector<HTMLElement>("[data-toolbar-index='8']")?.focus()); }} aria-label="Close guide">×</button>
           </div>
-          <section><h3>1. Navigate the workspace</h3><p>Scroll to zoom. Drag empty space to move around the tree. Click a node to inspect it. Right-click a node to rename it, focus or collapse branches, copy and paste splits, or trim descendants.</p></section>
-          <section><h3>2. Choose the target role</h3><p>The first toolbar tool defines the project target and where ControlTree should reuse it automatically.</p></section>
-          <section><h3>3. Split, explore, and format</h3><p>The Split tool offers a searchable ranked variable list, recommended or manual rules, random samples, and percentile groups. Existing splits can be replaced, removed, or moved below a newly inserted split. Distribution provides profiles, target comparisons, bucket examples, and scatter plots. Test measures separation, Metrics controls node summaries, Variable types defines data, and Tree settings controls appearance.</p></section>
-          <section><h3>4. Save, present, or export</h3><p>Save creates a reusable project configuration without source rows. The Present tool supports fullscreen, a synchronized second screen, a clean tree PNG, and a CSV enriched with each row's node and optional target prediction.</p></section>
-          <section><h3>Privacy</h3><p>CSV and Excel data is processed locally in the browser. Presentation state and tree images do not contain uploaded rows. The enriched CSV contains your source rows because it is created for you as a local download; it is not uploaded anywhere.</p></section>
-          <a className="help-github-link" href="https://github.com/daniel-vital-de-alcantara/ControlTree" target="_blank" rel="noreferrer">More documentation on GitHub ↗</a>
+          <div className="guide-options" role="toolbar" aria-label="Guide sections">
+            <button className={helpSection === "guide" ? "active" : ""} type="button" onClick={() => setHelpSection("guide")}>Guide</button>
+            <button className={helpSection === "shortcuts" ? "active" : ""} type="button" onClick={() => setHelpSection("shortcuts")}>Keyboard shortcuts</button>
+          </div>
+          {helpSection === "guide" ? <>
+            <section><h3>1. Navigate the workspace</h3><p>Scroll to zoom. Drag empty space to move around the tree. Tab moves between major regions; arrow keys move within them. Click a node to inspect it. Right-click a node to rename it, focus or collapse branches, copy and paste splits, or trim descendants.</p></section>
+            <section><h3>2. Choose the target role</h3><p>The first toolbar tool defines the project target and where ControlTree should reuse it automatically.</p></section>
+            <section><h3>3. Split, explore, and format</h3><p>The Split tool offers a searchable ranked variable list, recommended or manual rules, random samples, and percentile groups. Existing splits can be replaced, removed, or moved below a newly inserted split. Distribution provides profiles, target comparisons, bucket examples, and scatter plots.</p></section>
+            <section><h3>4. Save, present, or export</h3><p>Save creates a reusable project configuration without source rows. The Present tool supports fullscreen, a synchronized second screen, a clean tree PNG, and a CSV enriched with each row's node and optional target prediction.</p></section>
+            <section><h3>Privacy</h3><p>CSV and Excel data is processed locally in the browser. Presentation state and tree images do not contain uploaded rows. The enriched CSV contains your source rows because it is created for you as a local download; it is not uploaded anywhere.</p></section>
+            <a className="help-github-link" href="https://github.com/daniel-vital-de-alcantara/ControlTree" target="_blank" rel="noreferrer">More documentation on GitHub ↗</a>
+          </> : <div className="shortcut-reference">
+            <p className="shortcut-reference__note">Shortcuts pause while you type in a text, number, search, or selection field. Press Escape to leave an edit.</p>
+            {shortcutsByGroup("editor").map((section) => <section key={section.group}><h3>{section.group}</h3><div>{section.shortcuts.map((shortcut) => <div className="shortcut-row" key={shortcut.id}><span>{shortcut.title}</span><kbd>{shortcutLabel(shortcut)}</kbd></div>)}</div></section>)}
+          </div>}
         </aside>
 
         {homeWarningOpen && (
           <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setHomeWarningOpen(false); }}>
-            <section className="warning-dialog" role="dialog" aria-modal="true" aria-labelledby="unsaved-dialog-title" aria-describedby="unsaved-dialog-description">
+            <section className="warning-dialog" role="dialog" aria-modal="true" aria-labelledby="unsaved-dialog-title" aria-describedby="unsaved-dialog-description" onKeyDown={(event) => {
+              if (event.key !== "Tab") return;
+              const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+              const index = buttons.findIndex((button) => button === document.activeElement);
+              event.preventDefault();
+              buttons[(index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length]?.focus();
+            }}>
               <div className="warning-dialog__icon" aria-hidden="true">!</div>
               <div>
                 <p className="kicker">ControlTree project</p>
@@ -1238,7 +1554,7 @@ export default function App() {
               </div>
               <div className="warning-dialog__actions">
                 <button className="danger-button" type="button" onClick={leaveWorkspace}>Delete progress</button>
-                <button className="safe-button" type="button" autoFocus onClick={() => setHomeWarningOpen(false)}>Go back to tree</button>
+                <button className="safe-button" type="button" autoFocus onClick={() => { setHomeWarningOpen(false); window.requestAnimationFrame(() => modalReturnFocusRef.current?.focus()); }}>Go back to tree</button>
               </div>
             </section>
           </div>

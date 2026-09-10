@@ -12,8 +12,8 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 project = "controltree"
-copyright = "2026, ControlTree Contributors"
-author = "ControlTree Contributors"
+copyright = "2026, Daniel Vital de Alcantara"
+author = "Daniel Vital de Alcantara"
 release = "0.1.0"
 
 extensions = [

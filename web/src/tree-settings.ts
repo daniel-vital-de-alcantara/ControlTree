@@ -8,6 +8,8 @@ export type TreeAppearance = {
   connectorColor: string;
   backgroundColor: string;
   showGrid: boolean;
+  fontScale: number;
+  nodeSpacing: number;
 };
 
 export type NodeFieldVisibility = {
@@ -39,6 +41,8 @@ export const defaultAppearance: TreeAppearance = {
   connectorColor: "#8e9d95",
   backgroundColor: "#faf9f5",
   showGrid: true,
+  fontScale: 1,
+  nodeSpacing: 1,
 };
 
 export const defaultNodeFields: NodeFieldVisibility = {

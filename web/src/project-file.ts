@@ -213,6 +213,12 @@ export function parseProjectText(text: string): ControlTreeProject {
   for (const key of ["nodeColor", "accentColor", "connectorColor"]) {
     if (typeof appearance[key] !== "string") throw new Error("The saved appearance is invalid.");
   }
+  const fontScale = typeof appearance.fontScale === "number" && Number.isFinite(appearance.fontScale)
+    ? Math.min(1.5, Math.max(.8, appearance.fontScale))
+    : defaultAppearance.fontScale;
+  const nodeSpacing = typeof appearance.nodeSpacing === "number" && Number.isFinite(appearance.nodeSpacing)
+    ? Math.min(1.6, Math.max(.6, appearance.nodeSpacing))
+    : defaultAppearance.nodeSpacing;
   if (!Array.isArray(project.summaries)) throw new Error("The saved summaries are invalid.");
   const summaries = project.summaries.map((item) => {
     if (!item || typeof item !== "object") throw new Error("A saved summary is invalid.");
@@ -299,6 +305,8 @@ export function parseProjectText(text: string): ControlTreeProject {
         ? appearance.backgroundColor
         : defaultAppearance.backgroundColor,
       showGrid: typeof appearance.showGrid === "boolean" ? appearance.showGrid : defaultAppearance.showGrid,
+      fontScale,
+      nodeSpacing,
     },
     nodeFields,
     summaries,

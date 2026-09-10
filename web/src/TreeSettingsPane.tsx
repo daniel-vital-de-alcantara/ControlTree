@@ -105,6 +105,32 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
             <small>Turn this off for a clean, solid screenshot background.</small>
           </span>
         </label>
+        <div className="appearance-sliders">
+          <label className="appearance-slider">
+            <span><strong>Text size</strong><small>Increase readability in presentations and exports.</small></span>
+            <output>{Math.round(appearance.fontScale * 100)}%</output>
+            <input
+              type="range"
+              min="0.8"
+              max="1.5"
+              step="0.05"
+              value={appearance.fontScale}
+              onChange={(event) => onAppearanceChange({ ...appearance, fontScale: Number(event.target.value) })}
+            />
+          </label>
+          <label className="appearance-slider">
+            <span><strong>Node spacing</strong><small>Bring branches together or give complex trees more room.</small></span>
+            <output>{Math.round(appearance.nodeSpacing * 100)}%</output>
+            <input
+              type="range"
+              min="0.6"
+              max="1.6"
+              step="0.05"
+              value={appearance.nodeSpacing}
+              onChange={(event) => onAppearanceChange({ ...appearance, nodeSpacing: Number(event.target.value) })}
+            />
+          </label>
+        </div>
       </section>
       )}
 

@@ -113,6 +113,11 @@ numeric residual or categorical zero-or-one error. A tree can also be downloaded
 opening screen, that file can replay the split rules, colors, and summary
 settings while recalculating every node from the new rows.
 
+Tree settings include independent text-size and node-spacing controls, making
+the same tree easy to tune for a compact screenshot or a more readable client
+presentation. These settings are saved with the project and applied consistently
+in the workspace, presentation mode, and PNG exports.
+
 Clicking the project name in the workspace opens Save As, while the status dot
 shows whether the current configuration differs from the last saved version.
 Project files remain lightweight and data-free: they store the source filename

@@ -737,6 +737,8 @@ export default function App() {
     "--tree-connector-color": appearance.connectorColor,
     "--tree-background-color": appearance.backgroundColor,
     "--tree-grid-opacity": appearance.showGrid ? .32 : 0,
+    "--tree-font-scale": appearance.fontScale,
+    "--tree-spacing": appearance.nodeSpacing,
     "--summary-count": summaryMetrics.length,
     "--visible-field-count": [nodeFields.nodeName, nodeFields.nodeTitle, nodeFields.rowCount].filter(Boolean).length,
     "--canvas-grid-size": `${22 * viewport.scale}px`,
@@ -951,7 +953,8 @@ export default function App() {
     setIsExportingTreeImage(true);
     setDataSourceError("");
     try {
-      await downloadTreePng(treeElement, appearance, uploadedDataset?.fileName ?? "ControlTree");
+      const fileName = await downloadTreePng(treeElement, appearance, uploadedDataset?.fileName ?? "ControlTree");
+      setActionNotice(`${fileName} downloaded.`);
     } catch (reason) {
       setDataSourceError(reason instanceof Error ? reason.message : "The tree image could not be created.");
     } finally {

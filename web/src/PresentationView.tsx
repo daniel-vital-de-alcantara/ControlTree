@@ -79,6 +79,8 @@ export function PresentationView({ onExit }: { onExit?: () => void } = {}) {
     "--tree-connector-color": state.appearance.connectorColor,
     "--tree-background-color": state.appearance.backgroundColor ?? defaultAppearance.backgroundColor,
     "--tree-grid-opacity": (state.appearance.showGrid ?? defaultAppearance.showGrid) ? .32 : 0,
+    "--tree-font-scale": state.appearance.fontScale ?? defaultAppearance.fontScale,
+    "--tree-spacing": state.appearance.nodeSpacing ?? defaultAppearance.nodeSpacing,
     "--summary-count": state.summaryCount,
     "--visible-field-count": [
       (state.nodeFields ?? defaultNodeFields).nodeName,

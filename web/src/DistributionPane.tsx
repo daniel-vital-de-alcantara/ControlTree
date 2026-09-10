@@ -14,6 +14,7 @@ type Props = {
   node: TreeNode;
   settings: DistributionSettings;
   showInPresentation: boolean;
+  lockVariable?: boolean;
   onSettingsChange: (settings: DistributionSettings) => void;
   onShowInPresentationChange: (show: boolean) => void;
 };
@@ -91,7 +92,7 @@ export function DistributionResults({ snapshot }: { snapshot: DistributionSnapsh
   );
 }
 
-export function DistributionPane({ dataset, node, settings, showInPresentation, onSettingsChange, onShowInPresentationChange }: Props) {
+export function DistributionPane({ dataset, node, settings, showInPresentation, lockVariable = false, onSettingsChange, onShowInPresentationChange }: Props) {
   const snapshot = useMemo(
     () => createDistributionSnapshot(dataset, node, settings),
     [dataset, node, settings],
@@ -99,13 +100,19 @@ export function DistributionPane({ dataset, node, settings, showInPresentation, 
 
   return (
     <div className="distribution-pane">
-      <label className="field-label" htmlFor="distribution-variable">Variable</label>
-      <select id="distribution-variable" value={settings.variable} onChange={(event) => {
-        onSettingsChange({ ...settings, variable: event.target.value, binWidth: null });
-        onShowInPresentationChange(false);
-      }}>
-        {dataset.columns.map((column) => <option key={column} value={column}>{column}</option>)}
-      </select>
+      {lockVariable ? (
+        <div className="automatic-target-context"><span>Target distribution</span><strong>{settings.variable}</strong></div>
+      ) : (
+        <>
+          <label className="field-label" htmlFor="distribution-variable">Variable</label>
+          <select id="distribution-variable" value={settings.variable} onChange={(event) => {
+            onSettingsChange({ ...settings, variable: event.target.value, binWidth: null });
+            onShowInPresentationChange(false);
+          }}>
+            {dataset.columns.map((column) => <option key={column} value={column}>{column}</option>)}
+          </select>
+        </>
+      )}
 
       <div className="profile-context">
         <span>Node {node.id}</span>

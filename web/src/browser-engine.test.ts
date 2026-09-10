@@ -43,6 +43,25 @@ describe("private browser calculation engine", () => {
     expect(suggestions[0].criterion).toBe("Variance reduction");
   });
 
+  it("uses a categorical override when generating recommendations", async () => {
+    const imported = normalizeTable([
+      ["segment_code", "outcome"],
+      [1, "no"],
+      [1, "no"],
+      [2, "yes"],
+      [2, "yes"],
+    ], "segments.csv");
+    const dataset = {
+      ...imported,
+      variableTypes: { segment_code: "categorical" as const },
+    };
+
+    const suggestions = await fetchSplitSuggestions(dataset, "outcome");
+
+    expect(suggestions[0].feature).toBe("segment_code");
+    expect(suggestions[0].operator).toBe("==");
+  });
+
   it("creates ordered numeric branches and keeps missing values separate", async () => {
     const dataset = normalizeTable([
       ["age"],

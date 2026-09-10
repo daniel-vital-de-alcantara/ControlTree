@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyManualSplit, applySplit, describeRule, type SplitCandidate, type TreeNode } from "./domain";
+import { applyManualSplit, applySplit, describeRule, renameTreeNode, type SplitCandidate, type TreeNode } from "./domain";
 
 const candidate: SplitCandidate = {
   id: "fare-26",
@@ -56,5 +56,14 @@ describe("tree domain", () => {
     expect(next.children.map((node) => node.branchLabel)).toEqual(["<=25", "(25, 50]", ">50"]);
     expect(next.children).toHaveLength(3);
     expect(next.split?.kind).toBe("manual");
+  });
+
+  it("renames one node without mutating the original tree", () => {
+    const splitTree = applySplit(root, "root", candidate);
+    const renamed = renameTreeNode(splitTree, "root.1", "Low fare passengers");
+
+    expect(renamed.children[0].title).toBe("Low fare passengers");
+    expect(splitTree.children[0].title).toBe("Matching rows");
+    expect(renamed.children[1].title).toBe("Remaining rows");
   });
 });

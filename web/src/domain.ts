@@ -55,6 +55,11 @@ export function findTreeNode(root: TreeNode, nodeId: string): TreeNode | undefin
   return undefined;
 }
 
+export function renameTreeNode(root: TreeNode, nodeId: string, title: string): TreeNode {
+  if (root.id === nodeId) return { ...root, title };
+  return { ...root, children: root.children.map((child) => renameTreeNode(child, nodeId, title)) };
+}
+
 export function describeRule(split: SplitCandidate): string {
   const value = typeof split.value === "string" ? `“${split.value}”` : String(split.value);
   return `${split.feature} ${split.operator} ${value}`;

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { TreeNode } from "./domain";
-import { createProject, parseProjectText } from "./project-file";
+import { createProject, parseProjectText, projectFingerprint } from "./project-file";
 import { defaultAppearance, defaultNodeFields } from "./tree-settings";
+import { defaultTargetSettings } from "./target-settings";
 
 const tree: TreeNode = {
   id: "root",
@@ -26,8 +27,10 @@ describe("ControlTree project files", () => {
     expect(text).not.toContain("rowIndices");
     expect(text).not.toContain("targetLabel");
     expect(project.tree.split).toEqual({ kind: "binary", feature: "age", operator: "<=", value: 30 });
+    expect(project.tree.children[0].title).toBe("Matching rows");
     expect(project.summaries).toEqual([{ variable: "sales", aggregation: "sum", highlighted: true }]);
     expect(project.nodeFields).toEqual(defaultNodeFields);
+    expect(project.targetSettings).toEqual(defaultTargetSettings);
   });
 
   it("validates and parses a versioned project", () => {
@@ -43,6 +46,7 @@ describe("ControlTree project files", () => {
     const project = createProject(tree, "outcome", defaultAppearance, defaultNodeFields, []);
     const legacy = JSON.parse(JSON.stringify(project)) as Record<string, unknown>;
     delete legacy.nodeFields;
+    delete legacy.targetSettings;
     const legacyAppearance = legacy.appearance as Record<string, unknown>;
     delete legacyAppearance.backgroundColor;
     delete legacyAppearance.showGrid;
@@ -51,6 +55,7 @@ describe("ControlTree project files", () => {
     expect(parsed.nodeFields).toEqual(defaultNodeFields);
     expect(parsed.appearance.backgroundColor).toBe(defaultAppearance.backgroundColor);
     expect(parsed.appearance.showGrid).toBe(true);
+    expect(parsed.targetSettings).toEqual(defaultTargetSettings);
   });
 
   it("stores distribution settings without enabling presentation automatically", () => {
@@ -80,5 +85,44 @@ describe("ControlTree project files", () => {
     const project = createProject(tree, null, defaultAppearance, defaultNodeFields, []);
     const legacy = { ...project, target: "outcome" };
     expect(parseProjectText(JSON.stringify(legacy)).recommendationTarget).toBe("outcome");
+  });
+
+  it("stores variable type overrides without storing data", () => {
+    const project = createProject(
+      tree,
+      "outcome",
+      defaultAppearance,
+      defaultNodeFields,
+      [],
+      null,
+      { account: "categorical", revenue: "numeric" },
+    );
+
+    expect(parseProjectText(JSON.stringify(project)).variableTypes).toEqual({
+      account: "categorical",
+      revenue: "numeric",
+    });
+  });
+
+  it("stores only lightweight source metadata and serializes identical settings consistently", () => {
+    const project = createProject(
+      tree,
+      "outcome",
+      defaultAppearance,
+      defaultNodeFields,
+      [],
+      null,
+      {},
+      "customers.csv",
+      12345,
+      1700000000000,
+    );
+    const restored = parseProjectText(JSON.stringify(project));
+
+    expect(restored.sourceFileName).toBe("customers.csv");
+    expect(restored.sourceFileSize).toBe(12345);
+    expect(restored.sourceFileLastModified).toBe(1700000000000);
+    expect(projectFingerprint(restored)).toBe(projectFingerprint(project));
+    expect(JSON.stringify(project)).not.toContain("rowIndices");
   });
 });

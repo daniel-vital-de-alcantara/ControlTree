@@ -1,4 +1,4 @@
-import type { DataValue, ParsedDataset } from "./dataset";
+import { parseLocalizedNumber, type DataValue, type ParsedDataset } from "./dataset";
 import type { TreeSplitDefinition } from "./domain";
 
 export type MaterializedBranch = {
@@ -24,10 +24,13 @@ export function observedRowIndices(dataset: ParsedDataset, rowIndices?: number[]
   return rowIndices ?? allRowIndices(dataset);
 }
 
-export function asNumber(value: DataValue | undefined): number | null {
+export function asNumber(
+  value: DataValue | undefined,
+  dataset?: ParsedDataset,
+  feature?: string,
+): number | null {
   if (isMissing(value) || value instanceof Date || typeof value === "boolean") return null;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
+  return parseLocalizedNumber(value, feature ? dataset?.numberFormats?.[feature] : undefined);
 }
 
 export function isNumericColumn(
@@ -35,11 +38,25 @@ export function isNumericColumn(
   feature: string,
   rowIndices?: number[],
 ): boolean {
+  const override = dataset.variableTypes?.[feature];
+  if (override) return override === "numeric";
+  return inferredVariableType(dataset, feature, rowIndices) === "numeric";
+}
+
+export function inferredVariableType(
+  dataset: ParsedDataset,
+  feature: string,
+  rowIndices?: number[],
+): "numeric" | "categorical" {
+  const inferred = dataset.inferredTypes?.[feature];
+  if (inferred) return inferred;
   const position = columnPosition(dataset, feature);
   const values = observedRowIndices(dataset, rowIndices)
     .map((rowIndex) => dataset.rows[rowIndex]?.[position])
     .filter((value) => !isMissing(value));
-  return values.length > 0 && values.every((value) => asNumber(value) !== null);
+  return values.length > 0 && values.every((value) => asNumber(value, dataset, feature) !== null)
+    ? "numeric"
+    : "categorical";
 }
 
 function valueKey(value: DataValue): string {
@@ -65,7 +82,7 @@ export function splitRows(
   for (const rowIndex of rowIndices) {
     const cell = dataset.rows[rowIndex]?.[position];
     const matches = operator === "<="
-      ? asNumber(cell) !== null && asNumber(cell)! <= Number(value)
+      ? asNumber(cell, dataset, feature) !== null && asNumber(cell, dataset, feature)! <= Number(value)
       : valuesEqual(cell, value);
     (matches ? matching : remaining).push(rowIndex);
   }
@@ -94,7 +111,7 @@ export function materializeManualBranches(
     let previous: number | null = null;
     for (const cutpoint of cutpoints) {
       const indices = rowIndices.filter((rowIndex) => {
-        const current = asNumber(dataset.rows[rowIndex]?.[position]);
+        const current = asNumber(dataset.rows[rowIndex]?.[position], dataset, feature);
         return current !== null && current <= cutpoint && (previous === null || current > previous);
       });
       const label = previous === null
@@ -105,7 +122,7 @@ export function materializeManualBranches(
     }
     const last = cutpoints[cutpoints.length - 1];
     const upper = rowIndices.filter((rowIndex) => {
-      const current = asNumber(dataset.rows[rowIndex]?.[position]);
+      const current = asNumber(dataset.rows[rowIndex]?.[position], dataset, feature);
       return current !== null && current > last;
     });
     if (upper.length > 0) branches.push({ label: `>${formatCutpoint(last)}`, rowIndices: upper });

@@ -13,7 +13,7 @@ function materializeNode(
 ): TreeNode {
   const node: TreeNode = {
     id,
-    title,
+    title: saved.title ?? title,
     samples: rowIndices.length,
     ...(branchLabel ? { branchLabel } : {}),
     rowIndices,

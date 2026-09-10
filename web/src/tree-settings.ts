@@ -1,5 +1,6 @@
 import type { ParsedDataset } from "./dataset";
 import type { TreeNode } from "./domain";
+import { asNumber, isNumericColumn } from "./data-engine";
 
 export type TreeAppearance = {
   nodeColor: string;
@@ -15,13 +16,16 @@ export type NodeFieldVisibility = {
   rowCount: boolean;
 };
 
-export type SummaryAggregation = "average" | "sum" | "min" | "max" | "count" | "distinct" | "missing";
+export type SummaryAggregation = "average" | "sum" | "min" | "max" | "count" | "distinct" | "missing" | "mode";
+export type MetricFormat = "number" | "percentage";
 
 export type SummaryMetric = {
   id: string;
   variable: string;
   aggregation: SummaryAggregation;
   highlighted: boolean;
+  format?: MetricFormat;
+  target?: boolean;
 };
 
 export type NodeSummary = { id: string; label: string; value: string; highlighted: boolean };
@@ -49,6 +53,7 @@ export const allAggregations: Array<{ value: SummaryAggregation; label: string }
   { value: "count", label: "Count values" },
   { value: "distinct", label: "Count distinct" },
   { value: "missing", label: "Count missing" },
+  { value: "mode", label: "Most common" },
 ];
 
 function observedValues(dataset: ParsedDataset, variable: string, rowIndices?: number[]) {
@@ -62,11 +67,7 @@ export function isNumericVariable(
   variable: string,
   rowIndices?: number[],
 ): boolean {
-  const values = observedValues(dataset, variable, rowIndices)
-    .filter((value) => value !== null && String(value).trim() !== "");
-  return values.length > 0 && values.every((value) =>
-    typeof value === "number" || (typeof value === "string" && Number.isFinite(Number(value))),
-  );
+  return isNumericColumn(dataset, variable, rowIndices);
 }
 
 export function distinctValues(
@@ -95,20 +96,34 @@ export function summarizeMetric(
   const values = observedValues(dataset, metric.variable, rowIndices);
   const present = values.filter((value) => value !== null && String(value).trim() !== "");
 
+  if (metric.aggregation === "mode") {
+    if (!present.length) return "—";
+    const counts = new Map<string, number>();
+    present.forEach((value) => counts.set(String(value), (counts.get(String(value)) ?? 0) + 1));
+    const [label, count] = [...counts.entries()].sort((left, right) => right[1] - left[1])[0];
+    return metric.format === "percentage"
+      ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(count / present.length * 100)}%`
+      : label;
+  }
+
   if (metric.aggregation === "missing") return (values.length - present.length).toLocaleString();
   if (metric.aggregation === "count") return present.length.toLocaleString();
   if (metric.aggregation === "distinct") {
     return new Set(present.map(String)).size.toLocaleString();
   }
 
-  const numbers = present.map(Number).filter(Number.isFinite);
+  const numbers = present
+    .map((value) => asNumber(value, dataset, metric.variable))
+    .filter((value): value is number => value !== null);
   if (numbers.length === 0) return "—";
   let value: number;
   if (metric.aggregation === "sum") value = numbers.reduce((sum, item) => sum + item, 0);
   else if (metric.aggregation === "min") value = Math.min(...numbers);
   else if (metric.aggregation === "max") value = Math.max(...numbers);
   else value = numbers.reduce((sum, item) => sum + item, 0) / numbers.length;
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+  return metric.format === "percentage"
+    ? `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value * 100)}%`
+    : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
 }
 
 export function buildNodeSummaries(

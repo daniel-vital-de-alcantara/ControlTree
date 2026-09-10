@@ -39,4 +39,15 @@ describe("selected-node distributions", () => {
     expect(visible).toHaveLength(13);
     expect(visible.at(-1)).toEqual({ label: "Other (2)", count: 2 });
   });
+
+  it("shows numeric-looking codes as categories when overridden", () => {
+    const overridden = {
+      ...dataset,
+      variableTypes: { amount: "categorical" as const },
+    };
+
+    const profile = profileVariable(overridden, "amount");
+    expect(profile.numeric).toBe(false);
+    expect(profile.categories.map((category) => category.label)).toEqual(["10", "20", "30"]);
+  });
 });

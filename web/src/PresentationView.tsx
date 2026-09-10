@@ -19,7 +19,7 @@ function readInitialState(): PresentationState | null {
   }
 }
 
-export function PresentationView() {
+export function PresentationView({ onExit }: { onExit?: () => void } = {}) {
   const [state, setState] = useState<PresentationState | null>(readInitialState);
   const [zoom, setZoom] = useState(1);
 
@@ -70,6 +70,7 @@ export function PresentationView() {
           <span>{Math.round(zoom * 100)}%</span>
           <button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(1.5, value + .1))}>+</button>
           <button type="button" onClick={() => document.documentElement.requestFullscreen()}>Full screen</button>
+          {onExit && <button type="button" onClick={onExit}>Back to editor</button>}
         </div>
       </header>
       <div className={`presentation__stage${state.distribution ? " presentation__stage--split" : ""}`}>

@@ -41,7 +41,9 @@ export async function fetchSplitSuggestions(
   const distinctTargetValues = new Set(targetValues.filter((value) => !isMissing(value)).map(categoryKey));
   const regression = isNumericColumn(dataset, target, indices) && distinctTargetValues.size > 20;
   const minSamplesLeaf = Math.min(20, Math.max(1, Math.floor(indices.length / 10)));
-  const parentNumeric = targetValues.map(asNumber).filter((value): value is number => value !== null);
+  const parentNumeric = targetValues
+    .map((value) => asNumber(value, dataset, target))
+    .filter((value): value is number => value !== null);
   const parentScore = regression ? variance(parentNumeric) : gini(targetValues);
   const candidates: Array<Omit<SplitCandidate, "id">> = [];
 
@@ -52,7 +54,7 @@ export async function fetchSplitSuggestions(
     let candidateValues: Array<string | number | boolean>;
     if (numeric) {
       const sorted = featureValues
-        .map(asNumber)
+        .map((value) => asNumber(value, dataset, feature))
         .filter((value): value is number => value !== null)
         .sort((a, b) => a - b);
       candidateValues = [...new Set(Array.from(
@@ -68,7 +70,7 @@ export async function fetchSplitSuggestions(
       const [leftRowIndices, rightRowIndices] = splitRows(dataset, indices, feature, operator, value);
       if (leftRowIndices.length < minSamplesLeaf || rightRowIndices.length < minSamplesLeaf) continue;
       const targetNumbers = (branch: number[]) => branch
-        .map((rowIndex) => asNumber(dataset.rows[rowIndex]?.[targetPosition]))
+        .map((rowIndex) => asNumber(dataset.rows[rowIndex]?.[targetPosition], dataset, target))
         .filter((item): item is number => item !== null);
       const targetCategories = (branch: number[]) => branch.map((rowIndex) => dataset.rows[rowIndex]?.[targetPosition]);
       const leftNumbers = regression ? targetNumbers(leftRowIndices) : [];

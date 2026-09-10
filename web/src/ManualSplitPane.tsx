@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import type { ParsedDataset } from "./dataset";
+import { parseLocalizedNumber, type ParsedDataset } from "./dataset";
 import type { ManualSplitResult, TreeNode } from "./domain";
 import { requestManualSplit } from "./manual-splits";
 import { distinctValues, isNumericVariable } from "./tree-settings";
@@ -42,8 +42,12 @@ export function ManualSplitPane({ dataset, node, onApply }: Props) {
   }
 
   async function handleApply() {
+    const commaDecimals = dataset.numberFormats?.[feature] === "comma";
     const values = numeric
-      ? cutpoints.split(",").map((value) => Number(value.trim())).filter(Number.isFinite)
+      ? cutpoints
+        .split(commaDecimals ? /[;\n]+/ : /[,;\n]+/)
+        .map((value) => parseLocalizedNumber(value.trim(), dataset.numberFormats?.[feature]))
+        .filter((value): value is number => value !== null)
       : availableCategories.filter((value) => categories.includes(String(value)));
     if (values.length === 0) {
       setError(numeric ? "Enter at least one numeric cut point." : "Choose at least one category.");
@@ -91,9 +95,9 @@ export function ManualSplitPane({ dataset, node, onApply }: Props) {
             className="text-input"
             value={cutpoints}
             onChange={(event) => setCutpoints(event.target.value)}
-            placeholder="Example: 25, 40, 65"
+            placeholder={dataset.numberFormats?.[feature] === "comma" ? "Example: 25,5; 40; 65" : "Example: 25, 40, 65"}
           />
-          <p>Each cut point adds another child branch.</p>
+          <p>Each cut point adds another child branch. Use semicolons between comma-decimal values.</p>
         </div>
       ) : (
         <div className="manual-control">

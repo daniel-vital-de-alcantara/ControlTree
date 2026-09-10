@@ -87,12 +87,29 @@ dataset rows. A tree can also be downloaded as a versioned, data-free
 opening screen, that file can replay the split rules, colors, and summary
 settings while recalculating every node from the new rows.
 
+Clicking the project name in the workspace opens Save As, while the status dot
+shows whether the current configuration differs from the last saved version.
+Project files remain lightweight and data-free: they store the source filename
+and basic file metadata as a re-selection hint, never the dataset rows or an
+absolute local path. The data-source action can test a replacement CSV or Excel
+file against the current tree and keeps the existing source unchanged when the
+replacement is incompatible.
+
 The selected-node Distribution tab provides numeric statistics and histograms
 or categorical frequency bars. Histogram widths can be set explicitly, and the
 chosen variable, width, and scale remain stable while moving between nodes. An
 opt-in presentation control adds the current node's calculated distribution
 below the synchronized tree without sending source rows to the presentation
 window.
+
+CSV number inference recognizes both comma and dot decimal conventions,
+including common thousands separators. Variables with leading-zero values are
+kept categorical by default. The Tree configurator's Variable types section can
+override any column as automatic, numeric, or categorical; those overrides are
+used consistently by splits, targets, distributions, and metrics and are saved
+in project files. Excel workbooks are parsed in a background worker so the
+opening screen remains responsive and shows elapsed time plus a CSV performance
+tip for longer imports.
 
 ```bash
 cd web

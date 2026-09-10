@@ -1,5 +1,6 @@
 import type { DataValue, ParsedDataset } from "./dataset";
 import type { TreeNode } from "./domain";
+import { asNumber, isNumericColumn } from "./data-engine";
 
 export type DistributionScale = "count" | "percentage";
 
@@ -75,9 +76,7 @@ export function profileVariable(
   const present = values.filter((value): value is Exclude<DataValue, null> =>
     value !== null && String(value).trim() !== "",
   );
-  const numeric = present.length > 0 && present.every((value) =>
-    typeof value === "number" || (typeof value === "string" && Number.isFinite(Number(value))),
-  );
+  const numeric = isNumericColumn(dataset, variable, indices);
   const counts = new Map<string, number>();
   present.forEach((value) => {
     const label = valueLabel(value);
@@ -97,7 +96,11 @@ export function profileVariable(
   };
   if (!numeric) return base;
 
-  const numbers = present.map(Number).sort((left, right) => left - right);
+  const numbers = present
+    .map((value) => asNumber(value, dataset, variable))
+    .filter((value): value is number => value !== null)
+    .sort((left, right) => left - right);
+  if (numbers.length === 0) return { ...base, numeric: false };
   const average = numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
   const middle = Math.floor(numbers.length / 2);
   const median = numbers.length % 2

@@ -1,11 +1,14 @@
 import type { TreeNode, TreeSplitDefinition } from "./domain";
+import type { VariableTypeOverrides } from "./dataset";
 import type { DistributionSettings } from "./distribution";
-import { defaultAppearance, defaultNodeFields, type NodeFieldVisibility, type SummaryAggregation, type SummaryMetric, type TreeAppearance } from "./tree-settings";
+import { defaultTargetSettings, type TargetSettings } from "./target-settings";
+import { defaultAppearance, defaultNodeFields, type MetricFormat, type NodeFieldVisibility, type SummaryAggregation, type SummaryMetric, type TreeAppearance } from "./tree-settings";
 
 export const CONTROLTREE_FORMAT = "controltree";
 export const CONTROLTREE_VERSION = 1;
 
 export type SavedTreeNode = {
+  title?: string;
   split?: TreeSplitDefinition;
   children: SavedTreeNode[];
 };
@@ -14,19 +17,42 @@ export type ControlTreeProject = {
   format: typeof CONTROLTREE_FORMAT;
   version: typeof CONTROLTREE_VERSION;
   recommendationTarget?: string;
+  targetSettings?: TargetSettings;
   appearance: TreeAppearance;
   nodeFields: NodeFieldVisibility;
-  summaries: Array<{ variable: string; aggregation: SummaryAggregation; highlighted: boolean }>;
+  summaries: Array<{ variable: string; aggregation: SummaryAggregation; highlighted: boolean; format?: MetricFormat; target?: boolean }>;
   distribution?: DistributionSettings;
+  variableTypes?: VariableTypeOverrides;
+  sourceFileName?: string;
+  sourceFileSize?: number;
+  sourceFileLastModified?: number;
   tree: SavedTreeNode;
 };
 
 const aggregations = new Set<SummaryAggregation>([
-  "average", "sum", "min", "max", "count", "distinct", "missing",
+  "average", "sum", "min", "max", "count", "distinct", "missing", "mode",
 ]);
+
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, canonicalValue(item)]),
+    );
+  }
+  return value;
+}
+
+export function projectFingerprint(project: ControlTreeProject): string {
+  return JSON.stringify(canonicalValue(project));
+}
 
 function savedNode(node: TreeNode): SavedTreeNode {
   return {
+    title: node.title,
     ...(node.split ? { split: node.split } : {}),
     children: node.children.map(savedNode),
   };
@@ -39,15 +65,31 @@ export function createProject(
   nodeFields: NodeFieldVisibility,
   summaries: SummaryMetric[],
   distribution: DistributionSettings | null = null,
+  variableTypes: VariableTypeOverrides = {},
+  sourceFileName?: string,
+  sourceFileSize?: number,
+  sourceFileLastModified?: number,
+  targetSettings: TargetSettings = defaultTargetSettings,
 ): ControlTreeProject {
   return {
     format: CONTROLTREE_FORMAT,
     version: CONTROLTREE_VERSION,
     ...(recommendationTarget ? { recommendationTarget } : {}),
+    targetSettings: { ...targetSettings },
     appearance: { ...appearance },
     nodeFields: { ...nodeFields },
-    summaries: summaries.map(({ variable, aggregation, highlighted }) => ({ variable, aggregation, highlighted })),
+    summaries: summaries.map(({ variable, aggregation, highlighted, format, target }) => ({
+      variable,
+      aggregation,
+      highlighted,
+      ...(format === "percentage" ? { format } : {}),
+      ...(target ? { target: true } : {}),
+    })),
     ...(distribution ? { distribution: { ...distribution } } : {}),
+    ...(Object.keys(variableTypes).length ? { variableTypes: { ...variableTypes } } : {}),
+    ...(sourceFileName ? { sourceFileName } : {}),
+    ...(typeof sourceFileSize === "number" ? { sourceFileSize } : {}),
+    ...(typeof sourceFileLastModified === "number" ? { sourceFileLastModified } : {}),
     tree: savedNode(tree),
   };
 }
@@ -89,6 +131,10 @@ function parseNode(value: unknown): SavedTreeNode {
   const node = value as Record<string, unknown>;
   if (!Array.isArray(node.children)) throw new Error("A saved tree node is invalid.");
   const parsed: SavedTreeNode = { children: node.children.map(parseNode) };
+  if (node.title !== undefined) {
+    if (typeof node.title !== "string") throw new Error("A saved node name is invalid.");
+    parsed.title = node.title;
+  }
   if (node.split !== undefined) parsed.split = parseSplit(node.split);
   if (parsed.split && parsed.children.length < 2) {
     throw new Error("A saved split must contain at least two branches.");
@@ -116,6 +162,26 @@ export function parseProjectText(text: string): ControlTreeProject {
   const recommendationTarget = typeof project.recommendationTarget === "string" && project.recommendationTarget
     ? project.recommendationTarget
     : legacyTarget;
+  const savedTargetSettings = project.targetSettings && typeof project.targetSettings === "object"
+    ? project.targetSettings as Record<string, unknown>
+    : {};
+  const targetSettings: TargetSettings = {
+    dismissTargetReminder: typeof savedTargetSettings.dismissTargetReminder === "boolean"
+      ? savedTargetSettings.dismissTargetReminder
+      : defaultTargetSettings.dismissTargetReminder,
+    useForRecommendations: typeof savedTargetSettings.useForRecommendations === "boolean"
+      ? savedTargetSettings.useForRecommendations
+      : defaultTargetSettings.useForRecommendations,
+    useForTests: typeof savedTargetSettings.useForTests === "boolean"
+      ? savedTargetSettings.useForTests
+      : defaultTargetSettings.useForTests,
+    useForDistribution: typeof savedTargetSettings.useForDistribution === "boolean"
+      ? savedTargetSettings.useForDistribution
+      : defaultTargetSettings.useForDistribution,
+    showHighlightedMetric: typeof savedTargetSettings.showHighlightedMetric === "boolean"
+      ? savedTargetSettings.showHighlightedMetric
+      : defaultTargetSettings.showHighlightedMetric,
+  };
   if (!project.appearance || typeof project.appearance !== "object") throw new Error("The saved appearance is invalid.");
   const appearance = project.appearance as Record<string, unknown>;
   for (const key of ["nodeColor", "accentColor", "connectorColor"]) {
@@ -132,6 +198,8 @@ export function parseProjectText(text: string): ControlTreeProject {
       variable: metric.variable,
       aggregation: metric.aggregation as SummaryAggregation,
       highlighted: metric.highlighted === true,
+      ...(metric.format === "percentage" ? { format: "percentage" as const } : {}),
+      ...(metric.target === true ? { target: true } : {}),
     };
   });
   const savedFields = project.nodeFields && typeof project.nodeFields === "object"
@@ -166,10 +234,24 @@ export function parseProjectText(text: string): ControlTreeProject {
       scale: savedDistribution.scale,
     };
   }
+  let variableTypes: VariableTypeOverrides | undefined;
+  if (project.variableTypes !== undefined) {
+    if (!project.variableTypes || typeof project.variableTypes !== "object" || Array.isArray(project.variableTypes)) {
+      throw new Error("The saved variable types are invalid.");
+    }
+    variableTypes = {};
+    for (const [variable, type] of Object.entries(project.variableTypes as Record<string, unknown>)) {
+      if (!variable || (type !== "numeric" && type !== "categorical")) {
+        throw new Error("The saved variable types are invalid.");
+      }
+      variableTypes[variable] = type;
+    }
+  }
   return {
     format: CONTROLTREE_FORMAT,
     version: CONTROLTREE_VERSION,
     ...(recommendationTarget ? { recommendationTarget } : {}),
+    targetSettings,
     appearance: {
       nodeColor: appearance.nodeColor as string,
       accentColor: appearance.accentColor as string,
@@ -183,6 +265,10 @@ export function parseProjectText(text: string): ControlTreeProject {
     summaries,
     tree: parseNode(project.tree),
     ...(distribution ? { distribution } : {}),
+    ...(variableTypes && Object.keys(variableTypes).length ? { variableTypes } : {}),
+    ...(typeof project.sourceFileName === "string" && project.sourceFileName ? { sourceFileName: project.sourceFileName } : {}),
+    ...(typeof project.sourceFileSize === "number" && Number.isFinite(project.sourceFileSize) ? { sourceFileSize: project.sourceFileSize } : {}),
+    ...(typeof project.sourceFileLastModified === "number" && Number.isFinite(project.sourceFileLastModified) ? { sourceFileLastModified: project.sourceFileLastModified } : {}),
   };
 }
 
@@ -192,11 +278,60 @@ export async function readProjectFile(file: File): Promise<ControlTreeProject> {
 
 export function downloadProject(project: ControlTreeProject, datasetName: string) {
   const stem = datasetName.replace(/\.[^.]+$/, "").replace(/[^a-z0-9_-]+/gi, "-") || "tree";
+  const fileName = `${stem}.controltree.json`;
   const blob = new Blob([`${JSON.stringify(project, null, 2)}\n`], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${stem}.controltree.json`;
+  link.download = fileName;
   link.click();
   URL.revokeObjectURL(url);
+  return fileName;
+}
+
+type WritableFileHandle = FileSystemFileHandle & {
+  createWritable: () => Promise<{
+    write: (data: string) => Promise<void>;
+    close: () => Promise<void>;
+  }>;
+};
+
+type SavePickerWindow = Window & {
+  showSaveFilePicker?: (options: {
+    id?: string;
+    suggestedName?: string;
+    types?: Array<{ description: string; accept: Record<string, string[]> }>;
+  }) => Promise<WritableFileHandle>;
+  controlTreeDesktop?: {
+    saveProject: (contents: string, suggestedName: string) => Promise<string | null>;
+  };
+};
+
+export async function saveProjectAs(project: ControlTreeProject, datasetName: string): Promise<string | null> {
+  const stem = datasetName.replace(/\.[^.]+$/, "").replace(/[^a-z0-9_-]+/gi, "-") || "tree";
+  const suggestedName = `${stem}.controltree.json`;
+  const contents = `${JSON.stringify(project, null, 2)}\n`;
+  const saveWindow = window as SavePickerWindow;
+  if (saveWindow.controlTreeDesktop) {
+    return saveWindow.controlTreeDesktop.saveProject(contents, suggestedName);
+  }
+  const picker = saveWindow.showSaveFilePicker;
+  if (!picker) return downloadProject(project, datasetName);
+  try {
+    const handle = await picker.call(window, {
+      id: "controltree-projects",
+      suggestedName,
+      types: [{
+        description: "ControlTree project",
+        accept: { "application/json": [".json"] },
+      }],
+    });
+    const writable = await handle.createWritable();
+    await writable.write(contents);
+    await writable.close();
+    return handle.name;
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === "AbortError") return null;
+    throw reason;
+  }
 }

@@ -1,9 +1,10 @@
-import { useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import {
   parseDatasetFile,
   type ParsedDataset,
 } from "./dataset";
+import { pickDatasetFile } from "./file-picker";
 import { readProjectFile, type ControlTreeProject } from "./project-file";
 
 export type DatasetSelection = {
@@ -13,7 +14,7 @@ export type DatasetSelection = {
 
 type Props = {
   onContinue: (selection: DatasetSelection) => void;
-  onResume: (selection: DatasetSelection, project: ControlTreeProject) => Promise<void>;
+  onResume: (selection: DatasetSelection, project: ControlTreeProject, projectFileName: string) => Promise<void>;
   onUseDemo: () => void;
 };
 
@@ -23,24 +24,53 @@ export function DataSetup({ onContinue, onResume, onUseDemo }: Props) {
   const [dataset, setDataset] = useState<ParsedDataset | null>(null);
   const [error, setError] = useState("");
   const [isReading, setIsReading] = useState(false);
+  const [readingFileName, setReadingFileName] = useState("");
+  const [readingExcel, setReadingExcel] = useState(false);
+  const [readSeconds, setReadSeconds] = useState(0);
   const [isResuming, setIsResuming] = useState(false);
+  const [pendingProject, setPendingProject] = useState<{ project: ControlTreeProject; fileName: string } | null>(null);
 
-  async function handleFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  useEffect(() => {
+    if (!isReading) return;
+    const started = Date.now();
+    setReadSeconds(0);
+    const timer = window.setInterval(() => {
+      setReadSeconds(Math.floor((Date.now() - started) / 1000));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [isReading]);
 
+  async function readDataset(file: File) {
     setIsReading(true);
+    setReadingFileName(file.name);
+    setReadingExcel(file.name.toLowerCase().endsWith(".xlsx"));
     setError("");
     try {
       const parsed = await parseDatasetFile(file);
       setDataset(parsed);
+      if (pendingProject) await resumeProject(parsed, pendingProject.project, pendingProject.fileName);
     } catch (reason) {
       setDataset(null);
       setError(reason instanceof Error ? reason.message : "The file could not be read.");
     } finally {
       setIsReading(false);
-      event.target.value = "";
     }
+  }
+
+  async function chooseDataset() {
+    try {
+      const file = await pickDatasetFile();
+      if (file === undefined) inputRef.current?.click();
+      else if (file) await readDataset(file);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The file picker could not be opened.");
+    }
+  }
+
+  async function handleFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (file) await readDataset(file);
   }
 
   function handleContinue() {
@@ -49,31 +79,43 @@ export function DataSetup({ onContinue, onResume, onUseDemo }: Props) {
     onContinue({ dataset, recommendationTarget: null });
   }
 
-  async function handleProject(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file || !dataset) return;
+  async function resumeProject(sourceDataset: ParsedDataset, project: ControlTreeProject, projectFileName: string) {
     setIsResuming(true);
     setError("");
     try {
-      const project = await readProjectFile(file);
-      const missingVariable = project.summaries.find((metric) => !dataset.columns.includes(metric.variable))?.variable;
+      const missingVariable = project.summaries.find((metric) => !sourceDataset.columns.includes(metric.variable))?.variable;
       if (missingVariable) {
         throw new Error(`The saved summary variable “${missingVariable}” is not present in this dataset.`);
       }
       await onResume(
         {
-          dataset,
-          recommendationTarget: project.recommendationTarget && dataset.columns.includes(project.recommendationTarget)
+          dataset: sourceDataset,
+          recommendationTarget: project.recommendationTarget && sourceDataset.columns.includes(project.recommendationTarget)
             ? project.recommendationTarget
             : null,
         },
         project,
+        projectFileName,
       );
+      setPendingProject(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The saved tree could not be opened.");
     } finally {
       setIsResuming(false);
-      event.target.value = "";
+    }
+  }
+
+  async function handleProject(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setError("");
+    try {
+      const project = await readProjectFile(file);
+      if (dataset) await resumeProject(dataset, project, file.name);
+      else setPendingProject({ project, fileName: file.name });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The saved tree could not be opened.");
     }
   }
 
@@ -101,13 +143,19 @@ export function DataSetup({ onContinue, onResume, onUseDemo }: Props) {
           accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           onChange={handleFile}
         />
-        <button className="upload-button" type="button" onClick={() => inputRef.current?.click()}>
+        <button className="upload-button" type="button" disabled={isReading || isResuming} onClick={chooseDataset}>
           <span aria-hidden="true">↑</span>
           <span>
-            <strong>{isReading ? "Reading file…" : dataset?.fileName ?? "Choose CSV or Excel file"}</strong>
-            <small>{dataset ? `${dataset.rows.length.toLocaleString()} rows · ${dataset.columns.length} columns` : ".csv or .xlsx"}</small>
+            <strong>{isReading ? `Reading ${readingFileName}… ${readSeconds}s` : pendingProject ? `Choose data for ${pendingProject.fileName}` : dataset?.fileName ?? "Choose CSV or Excel file"}</strong>
+            <small>{isReading ? "Preparing your local dataset" : pendingProject ? `Expected source: ${pendingProject.project.sourceFileName ?? "a compatible CSV or Excel file"}` : dataset ? `${dataset.rows.length.toLocaleString()} rows · ${dataset.columns.length} columns` : ".csv or .xlsx"}</small>
           </span>
         </button>
+
+        {isReading && readingExcel && readSeconds >= 5 && (
+          <p className="setup-import-tip" role="status">
+            Excel is taking longer to process. Saving the worksheet as CSV is normally much faster.
+          </p>
+        )}
 
         {error && <p className="form-error" role="alert">{error}</p>}
 
@@ -120,7 +168,7 @@ export function DataSetup({ onContinue, onResume, onUseDemo }: Props) {
           Open tree workspace
           <span aria-hidden="true">→</span>
         </button>
-        <p className="setup-target-note">No target is required. Choose one later only when you want recommended splits.</p>
+        <p className="setup-target-note">After opening the workspace, ControlTree will guide you to choose an optional target and how it should be used.</p>
 
         <div className="setup-choice"><span>or</span></div>
 
@@ -134,12 +182,12 @@ export function DataSetup({ onContinue, onResume, onUseDemo }: Props) {
         <button
           className="resume-button"
           type="button"
-          disabled={!dataset || isReading || isResuming}
+          disabled={isReading || isResuming}
           onClick={() => projectInputRef.current?.click()}
         >
           <span>
-            <strong>{isResuming ? "Rebuilding saved tree…" : "Continue from a saved tree"}</strong>
-            <small>Choose a .controltree.json configuration</small>
+            <strong>{isResuming ? "Rebuilding saved tree…" : pendingProject ? pendingProject.fileName : "Continue from a saved tree"}</strong>
+            <small>{pendingProject ? "Now choose its source dataset above" : "Choose a .controltree.json configuration"}</small>
           </span>
           <span aria-hidden="true">↗</span>
         </button>

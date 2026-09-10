@@ -1,4 +1,5 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const applicationPage = path.join(__dirname, "..", "dist", "index.html");
@@ -15,9 +16,26 @@ function secureWindowOptions() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: path.join(__dirname, "preload.cjs"),
     },
   };
 }
+
+ipcMain.handle("controltree:save-project", async (event, payload) => {
+  if (!payload || typeof payload.contents !== "string" || typeof payload.suggestedName !== "string") {
+    throw new Error("The project save request was invalid.");
+  }
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  const result = await dialog.showSaveDialog(parent, {
+    title: "Save ControlTree project",
+    defaultPath: payload.suggestedName,
+    buttonLabel: "Save project",
+    filters: [{ name: "ControlTree project", extensions: ["json"] }],
+  });
+  if (result.canceled || !result.filePath) return null;
+  await fs.writeFile(result.filePath, payload.contents, "utf8");
+  return path.basename(result.filePath);
+});
 
 function createMainWindow() {
   const window = new BrowserWindow(secureWindowOptions());

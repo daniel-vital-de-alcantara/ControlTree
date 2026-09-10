@@ -24,7 +24,7 @@ function materializeNode(
   const branches = materializeSplit(dataset, rowIndices, saved.split);
   if (branches.length !== saved.children.length || branches.some((branch) => branch.rowIndices.length === 0)) {
     throw new Error(
-      `The saved split on '${saved.split.feature}' does not produce the same branches with this dataset. ` +
+      `The saved split '${saved.split.kind === "random" ? "random sample" : saved.split.feature}' does not produce the same branches with this dataset. ` +
       "Check that this is a compatible data version.",
     );
   }
@@ -35,6 +35,8 @@ function materializeNode(
     `${id}.${index + 1}`,
     saved.split?.kind === "binary"
       ? index === 0 ? "Matching rows" : "Remaining rows"
+      : saved.split?.kind === "random" ? `Sample ${index + 1}`
+      : saved.split?.kind === "percentile" ? `Percentile ${index + 1}`
       : `Branch ${index + 1}`,
     branch.label,
   ));

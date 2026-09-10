@@ -72,10 +72,11 @@ continuous targets by variance reduction. Split scoring, manual branching, and
 saved-tree replay all run in the browser: uploaded rows never leave the user's
 device. The Titanic demo remains available without an upload.
 
-The Node inspector supports recommended binary splits, manual numeric or
-categorical multiway splits, and a selected-node Distribution tab. That tab
-shows descriptive statistics plus configurable numeric histograms or
-categorical frequency bars. The Tree configurator controls node, accent,
+The Split tool supports recommended binary splits, manual numeric or
+categorical multiway splits, reproducible random sample groups, and percentile
+groups. Its searchable variable list includes the target at the end for manual
+or percentile splitting even though the target is intentionally not scored
+against itself. The Tree configurator controls node, accent,
 connector, and canvas colors and can show or hide the dotted grid. Its Metrics
 section controls the standard node fields and supports unlimited calculated
 metrics. Every metric can independently receive highlighted treatment in the
@@ -108,12 +109,20 @@ absolute local path. The data-source action can test a replacement CSV or Excel
 file against the current tree and keeps the existing source unchanged when the
 replacement is incompatible.
 
-The selected-node Distribution tab provides numeric statistics and histograms
-or categorical frequency bars. Histogram widths can be set explicitly, and the
-chosen variable, width, and scale remain stable while moving between nodes. An
-opt-in presentation control adds the current node's calculated distribution
-below the synchronized tree without sending source rows to the presentation
-window.
+The selected-node Distribution tool opens into three workflows: basic
+statistics and histograms, random examples from a selected chart bucket, and a
+two-variable scatter plot. Variable selectors are searchable and the example
+workflow supports any number of output columns plus reshuffling. Histograms
+accept an exact bin width, preserve true zero-height bars, label several
+non-overlapping axis points, and combine an excessively long tail into a final
+overflow bin. When a numeric target is configured, its average is overlaid as
+a line across the selected variable's buckets; selecting the target itself
+hides that redundant comparison. Scatter plots can use the target as the
+automatic second variable, accept explicit axis bounds, and report excluded
+rows. The chosen distribution variable, width, and scale remain stable while
+moving between nodes. An opt-in presentation control adds the current node's
+calculated distribution beside the synchronized tree without sending source
+rows to the presentation window.
 
 CSV number inference recognizes both comma and dot decimal conventions,
 including common thousands separators. Variables with leading-zero values are

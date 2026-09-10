@@ -116,8 +116,20 @@ function isPrimitive(value: unknown): value is string | number | boolean {
 function parseSplit(value: unknown): TreeSplitDefinition {
   if (!value || typeof value !== "object") throw new Error("A saved split is invalid.");
   const split = value as Record<string, unknown>;
+  if (split.kind === "random") {
+    if (!Array.isArray(split.percentages) || split.percentages.length < 2 || !split.percentages.every((item) => typeof item === "number" && Number.isFinite(item) && item > 0) || typeof split.seed !== "number" || !Number.isFinite(split.seed)) {
+      throw new Error("A saved random split is invalid.");
+    }
+    return { kind: "random", percentages: split.percentages as number[], seed: Math.trunc(split.seed) };
+  }
   if (typeof split.feature !== "string" || !split.feature) {
     throw new Error("A saved split is missing its variable.");
+  }
+  if (split.kind === "percentile") {
+    if (typeof split.buckets !== "number" || !Number.isInteger(split.buckets) || split.buckets < 2 || split.buckets > 10) {
+      throw new Error("A saved percentile split is invalid.");
+    }
+    return { kind: "percentile", feature: split.feature, buckets: split.buckets };
   }
   if (split.kind === "binary") {
     if ((split.operator !== "<=" && split.operator !== "==") || !isPrimitive(split.value)) {

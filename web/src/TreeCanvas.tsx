@@ -73,7 +73,7 @@ export function TreeCanvas({ node, selectedNodeId, onSelectNode, onNodeContextMe
       />
       {node.children.length > 0 && (
         <div className="tree__split">
-          <span className="tree__split-label">{node.split?.feature ?? "Split"}</span>
+          <span className="tree__split-label">{node.split?.kind === "random" ? "Random sample" : node.split?.feature ?? "Split"}</span>
           <div className="tree__children">
             {node.children.map((child) => (
               <div className="tree__branch" key={child.id}>

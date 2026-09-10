@@ -26,11 +26,16 @@ export type HistogramBin = {
   start: number;
   end: number;
   count: number;
+  overflow?: boolean;
+  rowIndices?: number[];
+  targetAverage?: number;
 };
 
 export type CategoryFrequency = {
   label: string;
   count: number;
+  rowIndices?: number[];
+  targetAverage?: number;
 };
 
 export type VariableProfile = {
@@ -59,6 +64,8 @@ export type DistributionSnapshot = {
   histogram: HistogramBin[];
   categories: CategoryFrequency[];
   histogramError?: string;
+  targetVariable?: string;
+  targetComparison?: boolean;
 };
 
 function valueLabel(value: DataValue): string {
@@ -129,7 +136,7 @@ export function automaticBinCount(valueCount: number): number {
   return Math.min(30, Math.max(5, Math.ceil(Math.log2(valueCount) + 1)));
 }
 
-export function buildHistogram(numbers: number[], binWidth: number | null): HistogramBin[] {
+export function buildHistogram(numbers: number[], binWidth: number | null, maximumVisibleBins = 24): HistogramBin[] {
   if (numbers.length === 0) return [];
   const minimum = Math.min(...numbers);
   const maximum = Math.max(...numbers);
@@ -138,14 +145,16 @@ export function buildHistogram(numbers: number[], binWidth: number | null): Hist
   const width = automatic ? (maximum - minimum) / automaticBinCount(numbers.length) : binWidth;
   if (!Number.isFinite(width) || width <= 0) return [];
   const start = automatic ? minimum : Math.floor(minimum / width) * width;
-  const binCount = automatic
+  const requestedBinCount = automatic
     ? automaticBinCount(numbers.length)
     : Math.floor((maximum - start) / width) + 1;
-  if (binCount > 200) return [];
+  const overflow = requestedBinCount > maximumVisibleBins;
+  const binCount = overflow ? maximumVisibleBins : requestedBinCount;
   const bins = Array.from({ length: binCount }, (_, index) => ({
     start: start + index * width,
-    end: automatic && index === binCount - 1 ? maximum : start + (index + 1) * width,
+    end: index === binCount - 1 && (automatic || overflow) ? maximum : start + (index + 1) * width,
     count: 0,
+    ...(overflow && index === binCount - 1 ? { overflow: true } : {}),
   }));
   numbers.forEach((value) => {
     const index = Math.min(Math.floor((value - start) / width), binCount - 1);
@@ -169,12 +178,40 @@ export function createDistributionSnapshot(
   dataset: ParsedDataset,
   node: TreeNode,
   settings: DistributionSettings,
+  targetVariable?: string | null,
 ): DistributionSnapshot {
   const profile = profileVariable(dataset, settings.variable, node.rowIndices);
   const histogram = profile.numeric ? buildHistogram(profile.numbers, settings.binWidth) : [];
-  const requestedBinCount = profile.numeric && settings.binWidth
-    ? Math.floor((Math.max(...profile.numbers) - Math.floor(Math.min(...profile.numbers) / settings.binWidth) * settings.binWidth) / settings.binWidth) + 1
-    : 0;
+  const sourceRows = node.rowIndices ?? dataset.rows.map((_, index) => index);
+  const variablePosition = dataset.columns.indexOf(settings.variable);
+  const targetPosition = targetVariable ? dataset.columns.indexOf(targetVariable) : -1;
+  const compareTarget = Boolean(targetVariable && targetVariable !== settings.variable && targetPosition >= 0 && isNumericColumn(dataset, targetVariable!, sourceRows));
+  const averageTarget = (indices: number[]) => {
+    if (!compareTarget) return undefined;
+    const values = indices.map((index) => asNumber(dataset.rows[index]?.[targetPosition], dataset, targetVariable!)).filter((value): value is number => value !== null);
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : undefined;
+  };
+  histogram.forEach((bin, index) => {
+    const indices = sourceRows.filter((rowIndex) => {
+      const value = asNumber(dataset.rows[rowIndex]?.[variablePosition], dataset, settings.variable);
+      if (value === null) return false;
+      return value >= bin.start && (index === histogram.length - 1 || bin.overflow ? value <= bin.end : value < bin.end);
+    });
+    bin.rowIndices = indices;
+    bin.targetAverage = averageTarget(indices);
+  });
+  const displayedCategories = profile.numeric ? [] : displayCategories(profile.categories);
+  displayedCategories.forEach((category) => {
+    const isOther = category.label.startsWith("Other (");
+    const visibleLabels = new Set(displayedCategories.filter((item) => !item.label.startsWith("Other (")).map((item) => item.label));
+    const indices = sourceRows.filter((rowIndex) => {
+      const value = dataset.rows[rowIndex]?.[variablePosition];
+      const label = value === null || String(value).trim() === "" ? "" : valueLabel(value);
+      return isOther ? Boolean(label) && !visibleLabels.has(label) : label === category.label;
+    });
+    category.rowIndices = indices;
+    category.targetAverage = averageTarget(indices);
+  });
   return {
     nodeId: node.id,
     nodeTitle: node.title,
@@ -188,9 +225,55 @@ export function createDistributionSnapshot(
     distinct: profile.distinct,
     statistics: profile.statistics,
     histogram,
-    categories: profile.numeric ? [] : displayCategories(profile.categories),
-    ...(requestedBinCount > 200 ? {
-      histogramError: `This width would create ${requestedBinCount.toLocaleString()} bins. Choose a larger width.`,
-    } : {}),
+    categories: displayedCategories,
+    ...(targetVariable ? { targetVariable } : {}),
+    targetComparison: compareTarget,
   };
+}
+
+export type ScatterBounds = { xMin: number | null; xMax: number | null; yMin: number | null; yMax: number | null };
+export type ScatterPoint = { x: number; y: number; rowIndex: number };
+export type ScatterSnapshot = {
+  xVariable: string;
+  yVariable: string;
+  points: ScatterPoint[];
+  displayedPoints: ScatterPoint[];
+  excluded: number;
+  total: number;
+  xDomain: [number, number];
+  yDomain: [number, number];
+};
+
+export function createScatterSnapshot(dataset: ParsedDataset, node: TreeNode, xVariable: string, yVariable: string, bounds: ScatterBounds, maximumPoints = 1200): ScatterSnapshot {
+  const xPosition = dataset.columns.indexOf(xVariable);
+  const yPosition = dataset.columns.indexOf(yVariable);
+  const rows = node.rowIndices ?? dataset.rows.map((_, index) => index);
+  const numeric = rows.map((rowIndex) => ({
+    rowIndex,
+    x: asNumber(dataset.rows[rowIndex]?.[xPosition], dataset, xVariable),
+    y: asNumber(dataset.rows[rowIndex]?.[yPosition], dataset, yVariable),
+  })).filter((item): item is ScatterPoint => item.x !== null && item.y !== null);
+  const filtered = numeric.filter((point) =>
+    (bounds.xMin === null || point.x >= bounds.xMin) && (bounds.xMax === null || point.x <= bounds.xMax) &&
+    (bounds.yMin === null || point.y >= bounds.yMin) && (bounds.yMax === null || point.y <= bounds.yMax));
+  const domain = (values: number[], lower: number | null, upper: number | null): [number, number] => {
+    const minimum = lower ?? (values.length ? Math.min(...values) : 0);
+    const maximum = upper ?? (values.length ? Math.max(...values) : 1);
+    return minimum === maximum ? [minimum - 1, maximum + 1] : [minimum, maximum];
+  };
+  const step = Math.max(1, Math.ceil(filtered.length / maximumPoints));
+  return {
+    xVariable, yVariable, points: filtered, displayedPoints: filtered.filter((_, index) => index % step === 0),
+    excluded: rows.length - filtered.length, total: rows.length,
+    xDomain: domain(filtered.map((point) => point.x), bounds.xMin, bounds.xMax),
+    yDomain: domain(filtered.map((point) => point.y), bounds.yMin, bounds.yMax),
+  };
+}
+
+export function takeExampleRows(dataset: ParsedDataset, rowIndices: number[], variables: string[], seed: number, count = 8): Array<Record<string, DataValue>> {
+  const ranked = [...rowIndices].sort((left, right) => {
+    const score = (value: number) => Math.sin((value + 1) * 99991 + seed) * 10000;
+    return (score(left) - Math.floor(score(left))) - (score(right) - Math.floor(score(right)));
+  }).slice(0, count);
+  return ranked.map((rowIndex) => Object.fromEntries(variables.map((variable) => [variable, dataset.rows[rowIndex]?.[dataset.columns.indexOf(variable)] ?? null])));
 }

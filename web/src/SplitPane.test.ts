@@ -22,6 +22,7 @@ describe("variable-first split workflow", () => {
       { feature: "age", score: .3, count: 2 },
       { feature: "segment", score: .1, count: 1 },
       { feature: "income", score: undefined, count: 0 },
+      { feature: "target", score: undefined, count: 0 },
     ]);
   });
 

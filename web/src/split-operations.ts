@@ -4,7 +4,7 @@ import type { ManualSplitResult, SplitCandidate, TreeNode, TreeSplitDefinition }
 
 export type SplitApplication = "replace" | "insert";
 
-type PreparedSplit = {
+export type PreparedSplit = {
   definition: TreeSplitDefinition;
   branches: Array<{ label: string; count: number; rowIndices: number[] }>;
 };
@@ -56,12 +56,12 @@ export function applyPreparedSplit(root: TreeNode, nodeId: string, split: Prepar
           root,
           branch.rowIndices,
           `${root.id}.${index + 1}`,
-          split.definition.kind === "binary" ? index === 0 ? "Matching rows" : "Remaining rows" : `Branch ${index + 1}`,
+          split.definition.kind === "binary" ? index === 0 ? "Matching rows" : "Remaining rows" : split.definition.kind === "random" ? `Sample ${index + 1}` : split.definition.kind === "percentile" ? `Percentile ${index + 1}` : `Branch ${index + 1}`,
           branch.label,
         )
       : {
           id: `${root.id}.${index + 1}`,
-          title: split.definition.kind === "binary" ? index === 0 ? "Matching rows" : "Remaining rows" : `Branch ${index + 1}`,
+          title: split.definition.kind === "binary" ? index === 0 ? "Matching rows" : "Remaining rows" : split.definition.kind === "random" ? `Sample ${index + 1}` : split.definition.kind === "percentile" ? `Percentile ${index + 1}` : `Branch ${index + 1}`,
           samples: branch.count,
           branchLabel: branch.label,
           rowIndices: branch.rowIndices,

@@ -36,7 +36,13 @@ function parsedSplit(value: unknown): TreeSplitDefinition | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object") throw new Error("The copied split is invalid.");
   const split = value as Record<string, unknown>;
+  if (split.kind === "random" && Array.isArray(split.percentages) && split.percentages.length >= 2 && split.percentages.every((item) => typeof item === "number" && Number.isFinite(item) && item > 0) && typeof split.seed === "number" && Number.isFinite(split.seed)) {
+    return { kind: "random", percentages: split.percentages as number[], seed: Math.trunc(split.seed) };
+  }
   if (typeof split.feature !== "string" || !split.feature) throw new Error("The copied split has no variable.");
+  if (split.kind === "percentile" && typeof split.buckets === "number" && Number.isInteger(split.buckets) && split.buckets >= 2 && split.buckets <= 10) {
+    return { kind: "percentile", feature: split.feature, buckets: split.buckets };
+  }
   if (split.kind === "binary" && (split.operator === "<=" || split.operator === "==") && isPrimitive(split.value)) {
     return { kind: "binary", feature: split.feature, operator: split.operator, value: split.value };
   }
@@ -97,7 +103,7 @@ function materializeCopiedNode(dataset: ParsedDataset, copied: ClipboardNode, ro
   if (!copied.split) return base;
   const branches = materializeSplit(dataset, rowIndices, copied.split);
   if (branches.length !== copied.children.length || branches.some((branch) => branch.rowIndices.length === 0)) {
-    throw new Error(`The copied split on “${copied.split.feature}” does not produce the same branches in this node.`);
+    throw new Error(`The copied ${copied.split.kind === "random" ? "random split" : `split on “${copied.split.feature}”`} does not produce the same branches in this node.`);
   }
   return {
     ...base,
@@ -107,7 +113,7 @@ function materializeCopiedNode(dataset: ParsedDataset, copied: ClipboardNode, ro
       copied.children[index],
       branch.rowIndices,
       `${id}.${index + 1}`,
-      copied.children[index].title ?? (copied.split?.kind === "binary" ? index === 0 ? "Matching rows" : "Remaining rows" : `Branch ${index + 1}`),
+      copied.children[index].title ?? (copied.split?.kind === "binary" ? index === 0 ? "Matching rows" : "Remaining rows" : copied.split?.kind === "random" ? `Sample ${index + 1}` : copied.split?.kind === "percentile" ? `Percentile ${index + 1}` : `Branch ${index + 1}`),
       branch.label,
     )),
   };

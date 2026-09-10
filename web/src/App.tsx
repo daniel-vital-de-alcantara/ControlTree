@@ -8,6 +8,7 @@ import { DistributionPane } from "./DistributionPane";
 import { createDistributionSnapshot, type DistributionSettings } from "./distribution";
 import { applySplit, describeRule, findTreeNode, renameTreeNode, type ManualSplitResult, type SplitCandidate, type TreeNode } from "./domain";
 import { ManualSplitPane } from "./ManualSplitPane";
+import { SpecialSplitPane } from "./SpecialSplitPane";
 import { pickDatasetFile } from "./file-picker";
 import { openPresentationWindow, presentationTree, publishPresentation, type PresentationState } from "./presentation";
 import { PresentationView } from "./PresentationView";
@@ -15,7 +16,7 @@ import { createProject, projectFingerprint as fingerprintProject, saveProjectAs,
 import { replayProject } from "./replay";
 import { candidateMatchesCurrentSplit, SplitPane } from "./SplitPane";
 import { copySplitsToClipboard, pasteCopiedSplits, readSplitsFromClipboard } from "./split-clipboard";
-import { applyPreparedSplit, preparedManualSplit, preparedRecommendedSplit, removeNodeSplit, type SplitApplication } from "./split-operations";
+import { applyPreparedSplit, preparedManualSplit, preparedRecommendedSplit, removeNodeSplit, type PreparedSplit, type SplitApplication } from "./split-operations";
 import { TreeCanvas } from "./TreeCanvas";
 import { downloadTreePng } from "./tree-image";
 import { TreeSettingsPane } from "./TreeSettingsPane";
@@ -37,7 +38,7 @@ export default function App() {
   const [suggestionElapsed, setSuggestionElapsed] = useState(0);
   const [splitFeature, setSplitFeature] = useState("");
   const [sidebarMode, setSidebarMode] = useState<"node" | "tree" | "metrics" | "variables" | "target" | "test" | "present" | "more">("node");
-  const [nodeTab, setNodeTab] = useState<"recommended" | "manual" | "distribution">("recommended");
+  const [nodeTab, setNodeTab] = useState<"recommended" | "manual" | "random" | "percentile" | "distribution">("recommended");
   const [appearance, setAppearance] = useState<TreeAppearance>(defaultAppearance);
   const [nodeFields, setNodeFields] = useState<NodeFieldVisibility>(defaultNodeFields);
   const [summaryMetrics, setSummaryMetrics] = useState<SummaryMetric[]>([]);
@@ -89,11 +90,7 @@ export default function App() {
         ? testVariable
         : uploadedDataset.columns[0] ?? ""
     : "";
-  const activeDistributionSettings = targetSettings.useForDistribution
-    ? distributionSettings && recommendationTarget
-      ? { ...distributionSettings, variable: recommendationTarget }
-      : null
-    : distributionSettings;
+  const activeDistributionSettings = distributionSettings;
   const projectSnapshot = useMemo(() => selection ? createProject(
     tree,
     recommendationTarget,
@@ -117,8 +114,8 @@ export default function App() {
   const canvasTree = useMemo(() => visibleTree(tree, focusNodeId, collapsedNodeIds), [tree, focusNodeId, collapsedNodeIds]);
   const presentationDistribution = useMemo(() => {
     if (!showDistributionInPresentation || !uploadedDataset || !selectedNode || !activeDistributionSettings) return undefined;
-    return createDistributionSnapshot(uploadedDataset, selectedNode, activeDistributionSettings);
-  }, [showDistributionInPresentation, uploadedDataset, selectedNode, activeDistributionSettings]);
+    return createDistributionSnapshot(uploadedDataset, selectedNode, activeDistributionSettings, targetSettings.useForDistribution ? recommendationTarget : null);
+  }, [showDistributionInPresentation, uploadedDataset, selectedNode, activeDistributionSettings, targetSettings.useForDistribution, recommendationTarget]);
   const presentationState = useMemo<PresentationState | null>(() => {
     if (!selection) return null;
     return {
@@ -281,6 +278,16 @@ export default function App() {
     setSuggestionStatus("loading");
   }
 
+  function handleSpecialApply(split: PreparedSplit, mode: SplitApplication) {
+    const nodeId = selectedNodeId;
+    setTree((current) => applyPreparedSplit(current, nodeId, split, mode, uploadedDataset));
+    setCandidateCache((current) => Object.fromEntries(Object.entries(current).filter(([cachedNodeId]) => !cachedNodeId.startsWith(`${nodeId}.`))));
+    setSelectedNodeId(`${nodeId}.1`);
+    setSplitFeature("");
+    setNodeTab("recommended");
+    setSuggestionStatus(recommendationTarget ? "loading" : "idle");
+  }
+
   function handleRemoveSelectedSplit() {
     if (!selectedNodeId) return;
     setTree((current) => removeNodeSplit(current, selectedNodeId));
@@ -382,11 +389,7 @@ export default function App() {
     setInspectorOpen(shouldPromptForTarget);
     setViewport({ x: 0, y: 0, scale: 1 });
     setProjectFileName(savedFileName);
-    const restoredFingerprintDistribution = restoredTargetSettings.useForDistribution
-      ? restoredTarget
-        ? { ...restoredDistribution, variable: restoredTarget }
-        : null
-      : restoredDistribution;
+    const restoredFingerprintDistribution = restoredDistribution;
     setSavedProjectFingerprint(fingerprintProject(createProject(
       restoredTree,
       configuredSelection.recommendationTarget,
@@ -423,10 +426,7 @@ export default function App() {
       setCandidateCache({});
       setSelectedSplitId("");
       setSuggestionStatus("loading");
-      if (targetSettings.useForDistribution) {
-        setDistributionSettings((current) => current ? { ...current, variable: nextTarget, binWidth: null } : current);
-        setShowDistributionInPresentation(false);
-      }
+      if (targetSettings.useForDistribution) setShowDistributionInPresentation(false);
     } catch (reason) {
       setTargetError(reason instanceof Error ? reason.message : "This target cannot be used.");
     }
@@ -517,8 +517,8 @@ export default function App() {
       return;
     }
     const node = findTreeNode(tree, nodeId);
-    if (!(inspectorOpen && sidebarMode === "node" && nodeTab === "distribution")) setNodeTab(node?.split?.kind === "manual" ? "manual" : "recommended");
-    setSplitFeature(node?.split?.feature ?? "");
+    if (!(inspectorOpen && sidebarMode === "node" && nodeTab === "distribution")) setNodeTab(node?.split?.kind === "manual" ? "manual" : node?.split?.kind === "random" ? "random" : node?.split?.kind === "percentile" ? "percentile" : "recommended");
+    setSplitFeature(node?.split && node.split.kind !== "random" ? node.split.feature : "");
     setSelectedNodeId(nodeId);
     setSidebarMode("node");
     setInspectorOpen(true);
@@ -569,8 +569,8 @@ export default function App() {
       setCandidateCache((current) => Object.fromEntries(Object.entries(current).filter(([cachedId]) => cachedId !== nodeId && !cachedId.startsWith(`${nodeId}.`))));
       setCollapsedNodeIds((current) => current.filter((collapsedId) => collapsedId !== nodeId && !collapsedId.startsWith(`${nodeId}.`)));
       const pastedNode = findTreeNode(nextTree, nodeId);
-      setSplitFeature(pastedNode?.split?.feature ?? "");
-      setNodeTab(pastedNode?.split?.kind === "manual" ? "manual" : "recommended");
+      setSplitFeature(pastedNode?.split && pastedNode.split.kind !== "random" ? pastedNode.split.feature : "");
+      setNodeTab(pastedNode?.split?.kind === "manual" ? "manual" : pastedNode?.split?.kind === "random" ? "random" : pastedNode?.split?.kind === "percentile" ? "percentile" : "recommended");
       setActionNotice(payload.mode === "single" ? "Split pasted." : "Split subtree pasted.");
     } catch (reason) {
       setDataSourceError(reason instanceof Error ? reason.message : "The copied split could not be pasted here.");
@@ -650,8 +650,8 @@ export default function App() {
       return;
     }
     setSidebarMode("node");
-    setNodeTab(selectedNode?.split?.kind === "manual" ? "manual" : "recommended");
-    setSplitFeature(selectedNode?.split?.feature ?? "");
+    setNodeTab(selectedNode?.split?.kind === "manual" ? "manual" : selectedNode?.split?.kind === "random" ? "random" : selectedNode?.split?.kind === "percentile" ? "percentile" : "recommended");
+    setSplitFeature(selectedNode?.split && selectedNode.split.kind !== "random" ? selectedNode.split.feature : "");
     setInspectorOpen(true);
   }
 
@@ -823,7 +823,7 @@ export default function App() {
       summaryMetrics.forEach((metric) => requiredVariables.add(metric.variable));
       if (distributionSettings) requiredVariables.add(distributionSettings.variable);
       function collectSplitVariables(node: TreeNode) {
-        if (node.split) requiredVariables.add(node.split.feature);
+        if (node.split && node.split.kind !== "random") requiredVariables.add(node.split.feature);
         node.children.forEach(collectSplitVariables);
       }
       collectSplitVariables(tree);
@@ -1096,9 +1096,9 @@ export default function App() {
                   <DistributionPane
                     dataset={uploadedDataset}
                     node={selectedNode}
+                    target={targetSettings.useForDistribution ? recommendationTarget : null}
                     settings={activeDistributionSettings}
                     showInPresentation={showDistributionInPresentation}
-                    lockVariable={targetSettings.useForDistribution}
                     onSettingsChange={setDistributionSettings}
                     onShowInPresentationChange={setShowDistributionInPresentation}
                   />
@@ -1113,7 +1113,7 @@ export default function App() {
                     key={`${selectedNode.id}:${splitFeature}`}
                     dataset={uploadedDataset}
                     node={selectedNode}
-                    feature={splitFeature || selectedNode.split?.feature || uploadedDataset.columns.find((column) => column !== recommendationTarget) || uploadedDataset.columns[0] || ""}
+                    feature={splitFeature || (selectedNode.split && selectedNode.split.kind !== "random" ? selectedNode.split.feature : "") || uploadedDataset.columns[0] || ""}
                     onBack={() => { setNodeTab("recommended"); setSplitFeature(""); }}
                     onApply={handleManualApply}
                     onRemoveSplit={handleRemoveSelectedSplit}
@@ -1121,6 +1121,19 @@ export default function App() {
                 ) : (
                   <div className="empty-state">Upload a dataset to create manual multiway splits.</div>
                 )
+              ) : nodeTab === "random" || nodeTab === "percentile" ? (
+                uploadedDataset && selectedNode?.rowIndices ? (
+                  <SpecialSplitPane
+                    key={`${selectedNode.id}:${nodeTab}:${splitFeature}`}
+                    dataset={uploadedDataset}
+                    node={selectedNode}
+                    mode={nodeTab}
+                    feature={splitFeature}
+                    onBack={() => { setNodeTab("recommended"); if (nodeTab === "random") setSplitFeature(""); }}
+                    onApply={handleSpecialApply}
+                    onRemoveSplit={handleRemoveSelectedSplit}
+                  />
+                ) : <div className="empty-state">Upload a dataset to create this split.</div>
               ) : uploadedDataset && selectedNode.rowIndices ? (
                 <>
                   {!targetSettings.useForRecommendations && (
@@ -1150,6 +1163,8 @@ export default function App() {
                     }}
                     onCandidateChange={setSelectedSplitId}
                     onManual={() => setNodeTab("manual")}
+                    onRandom={() => setNodeTab("random")}
+                    onPercentile={() => setNodeTab("percentile")}
                     onApply={handleApply}
                     onRemoveSplit={handleRemoveSelectedSplit}
                   />
@@ -1206,7 +1221,7 @@ export default function App() {
           </div>
           <section><h3>1. Navigate the workspace</h3><p>Scroll to zoom. Drag empty space to move around the tree. Click a node to inspect it. Right-click a node to rename it, focus or collapse branches, copy and paste splits, or trim descendants.</p></section>
           <section><h3>2. Choose the target role</h3><p>The first toolbar tool defines the project target and where ControlTree should reuse it automatically.</p></section>
-          <section><h3>3. Split, explore, and format</h3><p>The Split tool ranks variables first, then offers recommended or manual rules. Existing splits can be replaced, removed, or moved below a newly inserted split. Distribution explores values, Test measures separation, Metrics controls node summaries, Variable types defines data, and Tree settings controls appearance.</p></section>
+          <section><h3>3. Split, explore, and format</h3><p>The Split tool offers a searchable ranked variable list, recommended or manual rules, random samples, and percentile groups. Existing splits can be replaced, removed, or moved below a newly inserted split. Distribution provides profiles, target comparisons, bucket examples, and scatter plots. Test measures separation, Metrics controls node summaries, Variable types defines data, and Tree settings controls appearance.</p></section>
           <section><h3>4. Save, present, or export</h3><p>Save creates a reusable project configuration without source rows. The Present tool supports fullscreen, a synchronized second screen, a clean tree PNG, and a CSV enriched with each row's node and optional target prediction.</p></section>
           <section><h3>Privacy</h3><p>CSV and Excel data is processed locally in the browser. Presentation state and tree images do not contain uploaded rows. The enriched CSV contains your source rows because it is created for you as a local download; it is not uploaded anywhere.</p></section>
           <a className="help-github-link" href="https://github.com/daniel-vital-de-alcantara/ControlTree" target="_blank" rel="noreferrer">More documentation on GitHub ↗</a>

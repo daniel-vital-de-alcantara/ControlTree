@@ -23,8 +23,8 @@ const options: Array<{ key: keyof TargetSettings; title: string; detail: string 
   },
   {
     key: "useForDistribution",
-    title: "Use for Distribution",
-    detail: "Open the target distribution automatically while this option is on.",
+    title: "Compare in Distribution",
+    detail: "Overlay the average target on histograms for other numeric variables.",
   },
   {
     key: "showHighlightedMetric",

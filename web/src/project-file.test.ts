@@ -38,6 +38,13 @@ describe("ControlTree project files", () => {
     expect(parseProjectText(JSON.stringify(project))).toEqual(project);
   });
 
+  it("preserves random and percentile split definitions", () => {
+    const randomTree: TreeNode = { ...tree, split: { kind: "random", percentages: [70, 20, 10], seed: 123 } };
+    const percentileTree: TreeNode = { ...tree, split: { kind: "percentile", feature: "age", buckets: 2 } };
+    expect(parseProjectText(JSON.stringify(createProject(randomTree, null, defaultAppearance, defaultNodeFields, []))).tree.split).toEqual(randomTree.split);
+    expect(parseProjectText(JSON.stringify(createProject(percentileTree, null, defaultAppearance, defaultNodeFields, []))).tree.split).toEqual(percentileTree.split);
+  });
+
   it("preserves custom metric labels and display formats", () => {
     const fields = { ...defaultNodeFields, rowCountFormat: "percent_parent" as const };
     const project = createProject(tree, "outcome", defaultAppearance, fields, [

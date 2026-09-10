@@ -35,15 +35,15 @@ const incomeSplit = {
 describe("existing split operations", () => {
   it("replaces a split and removes its previous descendants", () => {
     const next = applyPreparedSplit(tree, "root", incomeSplit, "replace", dataset);
-    expect(next.split?.feature).toBe("income");
+    expect(next.split?.kind === "binary" ? next.split.feature : undefined).toBe("income");
     expect(next.children).toHaveLength(2);
     expect(next.children.every((child) => child.children.length === 0)).toBe(true);
   });
 
   it("inserts a split above the current split and reapplies it to each new child", () => {
     const next = applyPreparedSplit(tree, "root", incomeSplit, "insert", dataset);
-    expect(next.split?.feature).toBe("income");
-    expect(next.children.map((child) => child.split?.feature)).toEqual(["age", "age"]);
+    expect(next.split?.kind === "binary" ? next.split.feature : undefined).toBe("income");
+    expect(next.children.map((child) => child.split && child.split.kind !== "random" ? child.split.feature : undefined)).toEqual(["age", "age"]);
     expect(next.children.every((child) => child.children.length === 2)).toBe(true);
   });
 

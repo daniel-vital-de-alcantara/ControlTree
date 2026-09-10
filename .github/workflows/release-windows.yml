@@ -70,7 +70,7 @@ jobs:
           body: |
             ControlTree's interactive browser and desktop workbench.
 
-            This release adds background split recommendations, a variable-first split workflow, split insertion/removal, richer node metrics, tree and enriched-data exports, and node right-click actions including cross-window split copy/paste.
+            This release adds searchable variable selection, target-variable manual splitting, random and percentile splits, and a redesigned Distribution tool with target-comparison histograms, bucket examples, and scatter plots. It also includes the recent split editing, export, metric, and node right-click improvements.
 
             - **Setup** installs ControlTree and adds normal Windows shortcuts.
             - **Portable EXE** runs without installation after download.

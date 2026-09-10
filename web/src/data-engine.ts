@@ -93,6 +93,10 @@ function formatCutpoint(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(12)));
 }
 
+function formatPercent(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
 export function materializeManualBranches(
   dataset: ParsedDataset,
   rowIndices: number[],
@@ -156,6 +160,50 @@ export function materializeSplit(
   rowIndices: number[],
   split: TreeSplitDefinition,
 ): MaterializedBranch[] {
+  if (split.kind === "random") {
+    const percentages = split.percentages.filter((value) => Number.isFinite(value) && value > 0);
+    if (percentages.length < 2) throw new Error("Random split needs at least two positive groups.");
+    const total = percentages.reduce((sum, value) => sum + value, 0);
+    const shuffled = [...rowIndices].sort((left, right) => {
+      const hash = (value: number) => {
+        let number = (value + 1) ^ split.seed;
+        number = Math.imul(number ^ (number >>> 16), 0x45d9f3b);
+        number = Math.imul(number ^ (number >>> 16), 0x45d9f3b);
+        return (number ^ (number >>> 16)) >>> 0;
+      };
+      return hash(left) - hash(right);
+    });
+    let consumed = 0;
+    return percentages.map((percentage, index) => {
+      const end = index === percentages.length - 1
+        ? shuffled.length
+        : Math.round(shuffled.length * percentages.slice(0, index + 1).reduce((sum, value) => sum + value, 0) / total);
+      const branchRows = shuffled.slice(consumed, end);
+      consumed = end;
+      return { label: `Random ${formatPercent(percentage / total * 100)}%`, rowIndices: branchRows };
+    }).filter((branch) => branch.rowIndices.length > 0);
+  }
+  if (split.kind === "percentile") {
+    const position = dataset.columns.indexOf(split.feature);
+    const numericRows = rowIndices
+      .map((rowIndex) => ({ rowIndex, value: asNumber(dataset.rows[rowIndex]?.[position], dataset, split.feature) }))
+      .filter((item): item is { rowIndex: number; value: number } => item.value !== null)
+      .sort((left, right) => left.value - right.value || left.rowIndex - right.rowIndex);
+    if (numericRows.length < split.buckets) throw new Error("There are not enough numeric values for these percentile groups.");
+    const branches = Array.from({ length: split.buckets }, (_, index) => {
+      const start = Math.round(numericRows.length * index / split.buckets);
+      const end = Math.round(numericRows.length * (index + 1) / split.buckets);
+      const values = numericRows.slice(start, end);
+      return {
+        label: `P${Math.round(index * 100 / split.buckets)}–P${Math.round((index + 1) * 100 / split.buckets)}`,
+        rowIndices: values.map((item) => item.rowIndex),
+      };
+    }).filter((branch) => branch.rowIndices.length > 0);
+    const numericSet = new Set(numericRows.map((item) => item.rowIndex));
+    const missing = rowIndices.filter((rowIndex) => !numericSet.has(rowIndex));
+    if (missing.length) branches[branches.length - 1].rowIndices.push(...missing);
+    return branches;
+  }
   if (split.kind === "manual") {
     return materializeManualBranches(
       dataset,

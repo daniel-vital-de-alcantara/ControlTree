@@ -40,6 +40,33 @@ describe("existing split operations", () => {
     expect(next.children.every((child) => child.children.length === 0)).toBe(true);
   });
 
+  it("preserves existing descendant splits by row overlap when replacing a parent split", () => {
+    const withDescendants: TreeNode = {
+      ...tree,
+      children: [
+        tree.children[0],
+        {
+          ...tree.children[1],
+          split: { kind: "binary", feature: "income", operator: "<=", value: 25 },
+          children: [
+            { id: "root.2.1", title: "Low", samples: 1, rowIndices: [2], children: [] },
+            { id: "root.2.2", title: "High", samples: 1, rowIndices: [3], children: [] },
+          ],
+        },
+      ],
+    };
+    const replacement = {
+      definition: { kind: "binary" as const, feature: "age", operator: "<=" as const, value: 25 },
+      branches: [
+        { label: "age <= 25", count: 1, rowIndices: [0] },
+        { label: "not (age <= 25)", count: 3, rowIndices: [1, 2, 3] },
+      ],
+    };
+    const next = applyPreparedSplit(withDescendants, "root", replacement, "replace", dataset);
+    expect(next.children[1].split).toEqual(withDescendants.children[1].split);
+    expect(next.children[1].children.map((child) => child.samples)).toEqual([1, 2]);
+  });
+
   it("inserts a split above the current split and reapplies it to each new child", () => {
     const next = applyPreparedSplit(tree, "root", incomeSplit, "insert", dataset);
     expect(next.split?.kind === "binary" ? next.split.feature : undefined).toBe("income");

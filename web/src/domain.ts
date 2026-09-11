@@ -25,6 +25,7 @@ export type TreeSplitDefinition =
       forceCategorical: boolean;
       includeOther: boolean;
       missingDestination?: number | "other" | "exclude";
+      missingValue?: number | string | boolean;
     }
   | {
       kind: "random";

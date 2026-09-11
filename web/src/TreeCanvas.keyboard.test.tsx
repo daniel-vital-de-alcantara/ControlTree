@@ -20,4 +20,10 @@ describe("TreeCanvas keyboard accessibility", () => {
     expect(markup.match(/role="treeitem"/g)).toHaveLength(3);
     expect(markup).toContain('aria-selected="true"');
   });
+
+  it("renders the compact layout as one layered tree composite", () => {
+    const markup = renderToStaticMarkup(<TreeCanvas node={tree} selectedNodeId="" keyboardFocusedNodeId="root" onSelectNode={() => undefined} layout="compact" />);
+    expect(markup).toContain("compact-tree");
+    expect(markup.match(/role="treeitem"/g)).toHaveLength(3);
+  });
 });

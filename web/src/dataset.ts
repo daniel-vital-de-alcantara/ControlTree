@@ -174,13 +174,17 @@ export async function parseDatasetFile(file: File): Promise<ParsedDataset> {
   }
 
   const text = await file.text();
+  return { ...parseCsvText(text, file.name), fileSize: file.size, fileLastModified: file.lastModified };
+}
+
+export function parseCsvText(text: string, fileName: string): ParsedDataset {
   const result = Papa.parse<Array<string | null>>(text, {
     skipEmptyLines: "greedy",
   });
   if (result.errors.length > 0) {
     throw new Error(`CSV parsing failed: ${result.errors[0].message}`);
   }
-  return { ...normalizeTable(result.data, file.name), fileSize: file.size, fileLastModified: file.lastModified };
+  return normalizeTable(result.data, fileName);
 }
 
 export function summarizeTarget(dataset: ParsedDataset, target: string, rowIndices?: number[]): {

@@ -105,6 +105,7 @@ export function materializeManualBranches(
   forceCategorical: boolean,
   includeOther: boolean,
   missingDestination: number | "other" | "exclude" = includeOther ? "other" : "exclude",
+  missingValue?: number | string | boolean,
 ): MaterializedBranch[] {
   const position = columnPosition(dataset, feature);
   const numeric = isNumericColumn(dataset, feature, rowIndices) && !forceCategorical;
@@ -132,10 +133,15 @@ export function materializeManualBranches(
     });
     branches.push({ label: `>${formatCutpoint(last)}`, rowIndices: upper });
     const missing = rowIndices.filter((rowIndex) => isMissing(dataset.rows[rowIndex]?.[position]));
-    if (typeof missingDestination === "number" && branches[missingDestination]) {
-      branches[missingDestination].rowIndices.push(...missing);
-      branches[missingDestination].label += " + missing";
-    } else if (missingDestination === "other") {
+    const numericMissing = missingValue === undefined ? null : asNumber(missingValue, dataset, feature);
+    const missingCutpointIndex = numericMissing === null ? -1 : cutpoints.findIndex((cutpoint) => numericMissing <= cutpoint);
+    const effectiveMissingDestination = numericMissing === null
+      ? missingDestination
+      : missingCutpointIndex < 0 ? cutpoints.length : missingCutpointIndex;
+    if (typeof effectiveMissingDestination === "number" && branches[effectiveMissingDestination]) {
+      branches[effectiveMissingDestination].rowIndices.push(...missing);
+      if (missing.length) branches[effectiveMissingDestination].label += missingValue === undefined ? " + missing" : ` + missing as ${String(missingValue)}`;
+    } else if (effectiveMissingDestination === "other") {
       branches.push({ label: "Missing", rowIndices: missing });
     }
   } else {
@@ -145,17 +151,19 @@ export function materializeManualBranches(
       branches.push({ label: String(value), rowIndices: indices });
     }
     const missing = rowIndices.filter((rowIndex) => isMissing(dataset.rows[rowIndex]?.[position]));
-    if (typeof missingDestination === "number" && branches[missingDestination]) {
-      branches[missingDestination].rowIndices.push(...missing);
-      branches[missingDestination].label += " + missing";
+    const missingValueIndex = missingValue === undefined ? -1 : values.findIndex((value) => valuesEqual(value, missingValue));
+    const effectiveMissingDestination = missingValueIndex >= 0 ? missingValueIndex : missingValue === undefined ? missingDestination : includeOther ? "other" : "exclude";
+    if (typeof effectiveMissingDestination === "number" && branches[effectiveMissingDestination]) {
+      branches[effectiveMissingDestination].rowIndices.push(...missing);
+      if (missing.length) branches[effectiveMissingDestination].label += missingValue === undefined ? " + missing" : ` + missing as ${String(missingValue)}`;
     }
     if (includeOther) {
       const other = rowIndices.filter((rowIndex) => {
         const cell = dataset.rows[rowIndex]?.[position];
-        return (missingDestination === "other" && isMissing(cell)) || (!isMissing(cell) && !values.some((value) => valuesEqual(cell, value)));
+        return (effectiveMissingDestination === "other" && isMissing(cell)) || (!isMissing(cell) && !values.some((value) => valuesEqual(cell, value)));
       });
-      branches.push({ label: missingDestination === "other" ? "Other / missing" : "Other", rowIndices: other });
-    } else if (missingDestination === "other") {
+      branches.push({ label: effectiveMissingDestination === "other" && missing.length ? missingValue === undefined ? "Other / missing" : `Other / missing as ${String(missingValue)}` : "Other", rowIndices: other });
+    } else if (effectiveMissingDestination === "other") {
       branches.push({ label: "Missing", rowIndices: missing });
     }
   }
@@ -227,6 +235,7 @@ export function materializeSplit(
       split.forceCategorical,
       split.includeOther,
       split.missingDestination,
+      split.missingValue,
     );
   }
   const [matching, remaining] = splitRows(

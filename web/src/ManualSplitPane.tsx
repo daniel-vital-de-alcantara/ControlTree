@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { searchCategoryValues, type CategoryValue } from "./category-search";
 import { parseLocalizedNumber, type ParsedDataset } from "./dataset";
+import { columnPosition, isMissing } from "./data-engine";
 import { describeTreeSplit, type ManualSplitResult, type TreeNode } from "./domain";
 import type { SplitApplication } from "./split-operations";
 import { requestManualSplit } from "./manual-splits";
@@ -16,31 +17,35 @@ type Props = {
   onRemoveSplit: () => void;
 };
 
+function categoryKey(value: CategoryValue): string {
+  return `${typeof value}:${String(value)}`;
+}
+
 export function ManualSplitPane({ dataset, node, feature, onBack, onApply, onRemoveSplit }: Props) {
   const existingManual = node.split?.kind === "manual" && node.split.feature === feature ? node.split : undefined;
+  const inferredNumeric = feature ? isNumericVariable(dataset, feature, node.rowIndices) : false;
   const [cutpoints, setCutpoints] = useState(existingManual && !existingManual.forceCategorical ? existingManual.values.join(dataset.numberFormats?.[feature] === "comma" ? "; " : ", ") : "");
   const [categories, setCategories] = useState<CategoryValue[]>(existingManual?.forceCategorical ? existingManual.values : []);
   const [includeOther, setIncludeOther] = useState(existingManual?.includeOther ?? true);
-  const [missingDestination, setMissingDestination] = useState<number | "other" | "exclude">(existingManual?.missingDestination ?? (existingManual?.includeOther === false ? "exclude" : "other"));
+  const existingMissingValue = existingManual?.missingValue ?? (!inferredNumeric && typeof existingManual?.missingDestination === "number" ? existingManual.values[existingManual.missingDestination] : undefined);
+  const [missingNumericValue, setMissingNumericValue] = useState(existingMissingValue === undefined ? "" : String(existingMissingValue));
+  const [missingCategoryKey, setMissingCategoryKey] = useState(existingMissingValue !== undefined ? categoryKey(existingMissingValue) : "__other");
   const [treatAsCategories, setTreatAsCategories] = useState(existingManual?.forceCategorical ?? false);
   const [status, setStatus] = useState<"idle" | "loading">("idle");
   const [categoryQuery, setCategoryQuery] = useState("");
   const [categoryStatus, setCategoryStatus] = useState<"idle" | "loading">("idle");
   const [availableCategories, setAvailableCategories] = useState<CategoryValue[]>([]);
   const [error, setError] = useState("");
-  const inferredNumeric = feature ? isNumericVariable(dataset, feature, node.rowIndices) : false;
   const numeric = inferredNumeric && !treatAsCategories;
   const numericCutpoints = useMemo(() => {
     const commaDecimals = dataset.numberFormats?.[feature] === "comma";
     return [...new Set(cutpoints.split(commaDecimals ? /[;\n]+/ : /[,;\n]+/).map((value) => parseLocalizedNumber(value.trim(), dataset.numberFormats?.[feature])).filter((value): value is number => value !== null))].sort((left, right) => left - right);
   }, [cutpoints, dataset.numberFormats, feature]);
-  const missingBranches = numeric
-    ? numericCutpoints.map((value, index) => index === 0 ? `≤ ${value}` : `${numericCutpoints[index - 1]} to ${value}`).concat(numericCutpoints.length ? [`> ${numericCutpoints.at(-1)}`] : [])
-    : categories.map(String);
-
-  useEffect(() => {
-    if (typeof missingDestination === "number" && missingDestination >= missingBranches.length) setMissingDestination("other");
-  }, [missingBranches.length, missingDestination]);
+  const missingCount = useMemo(() => {
+    if (!feature) return 0;
+    const position = columnPosition(dataset, feature);
+    return (node.rowIndices ?? []).reduce((count, rowIndex) => count + (isMissing(dataset.rows[rowIndex]?.[position]) ? 1 : 0), 0);
+  }, [dataset, feature, node.rowIndices]);
 
   useEffect(() => {
     if (!feature || numeric) { setAvailableCategories([]); return; }
@@ -56,13 +61,13 @@ export function ManualSplitPane({ dataset, node, feature, onBack, onApply, onRem
   }, [dataset, feature, node.rowIndices, numeric, categoryQuery]);
 
   function toggleCategory(value: CategoryValue) {
-    const key = `${typeof value}:${String(value)}`;
-    setCategories((current) => current.some((item) => `${typeof item}:${String(item)}` === key)
-      ? current.filter((item) => `${typeof item}:${String(item)}` !== key)
+    const key = categoryKey(value);
+    setCategories((current) => current.some((item) => categoryKey(item) === key)
+      ? current.filter((item) => categoryKey(item) !== key)
       : [...current, value]);
   }
 
-  async function handleApply() {
+  async function apply(application: SplitApplication) {
     const commaDecimals = dataset.numberFormats?.[feature] === "comma";
     const values = numeric
       ? cutpoints
@@ -73,6 +78,21 @@ export function ManualSplitPane({ dataset, node, feature, onBack, onApply, onRem
     if (values.length === 0) {
       setError(numeric ? "Enter at least one numeric cut point." : "Choose at least one category.");
       return;
+    }
+
+    let missingDestination: number | "other" | "exclude" = "exclude";
+    let missingValue: CategoryValue | undefined;
+    if (missingCount > 0 && numeric) {
+      const parsed = parseLocalizedNumber(missingNumericValue.trim(), dataset.numberFormats?.[feature]);
+      if (parsed === null) { setError("Enter a valid number to use for missing values."); return; }
+      missingValue = parsed;
+    } else if (missingCount > 0) {
+      if (missingCategoryKey === "__other" && includeOther) missingDestination = "other";
+      else {
+        missingValue = categories.find((value) => categoryKey(value) === missingCategoryKey);
+        if (missingValue === undefined) { setError("Choose one of the selected categories for missing values."); return; }
+        missingDestination = categories.findIndex((value) => categoryKey(value) === missingCategoryKey);
+      }
     }
 
     setStatus("loading");
@@ -86,8 +106,9 @@ export function ManualSplitPane({ dataset, node, feature, onBack, onApply, onRem
         !numeric,
         includeOther,
         missingDestination,
+        missingValue,
       );
-      onApply(result, "replace");
+      onApply(result, application);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The manual split could not be applied.");
     } finally {
@@ -144,7 +165,7 @@ export function ManualSplitPane({ dataset, node, feature, onBack, onApply, onRem
               <label className="category-option" key={`${typeof value}:${String(value)}`}>
                 <input
                   type="checkbox"
-                  checked={categories.some((item) => `${typeof item}:${String(item)}` === `${typeof value}:${String(value)}`)}
+                  checked={categories.some((item) => categoryKey(item) === categoryKey(value))}
                   onChange={() => toggleCategory(value)}
                 />
                 <span>{String(value)}</span>
@@ -159,40 +180,25 @@ export function ManualSplitPane({ dataset, node, feature, onBack, onApply, onRem
         <input type="checkbox" checked={includeOther} onChange={(event) => setIncludeOther(event.target.checked)} />
         <span>Include unmatched values as Other</span>
       </label>}
-      <label className="manual-missing-control">
-        <span><strong>Treat missing values as</strong><small>The selected branch label will identify when missing rows are included.</small></span>
-        <select value={typeof missingDestination === "number" ? `branch:${missingDestination}` : missingDestination} onChange={(event) => setMissingDestination(event.target.value.startsWith("branch:") ? Number(event.target.value.slice(7)) : event.target.value as "other" | "exclude")}>
-          <option value="other">Separate missing branch</option>
-          <option value="exclude">Exclude from this split</option>
-          {missingBranches.map((label, index) => <option value={`branch:${index}`} key={`${label}-${index}`}>{label}</option>)}
-        </select>
-      </label>
+      {missingCount > 0 && <div className="manual-control missing-value-control">
+        <label className="field-label" htmlFor="manual-missing-value">Treat {missingCount.toLocaleString()} missing {missingCount === 1 ? "value" : "values"} as</label>
+        {numeric ? (
+          <input id="manual-missing-value" className="text-input" inputMode="decimal" value={missingNumericValue} onChange={(event) => setMissingNumericValue(event.target.value)} placeholder="Enter a number" />
+        ) : (
+          <select id="manual-missing-value" value={missingCategoryKey} onChange={(event) => setMissingCategoryKey(event.target.value)}>
+            {includeOther && <option value="__other">Other / unmatched values</option>}
+            {categories.map((value) => <option value={categoryKey(value)} key={categoryKey(value)}>{String(value)}</option>)}
+          </select>
+        )}
+        <p>Missing rows will follow the same branch as this value, and the branch label will identify the treatment.</p>
+      </div>}
       {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="primary-button" type="button" onClick={handleApply} disabled={status === "loading" || !feature}>
+      <button className="primary-button" type="button" onClick={() => apply("replace")} disabled={status === "loading" || !feature}>
         {status === "loading" ? "Applying split…" : node.children.length ? "Replace current split" : "Apply manual split"}
         <span aria-hidden="true">→</span>
       </button>
       {node.children.length > 0 && (
-        <><button className="secondary-button split-insert-button" type="button" disabled={status === "loading" || !feature} onClick={async () => {
-          const commaDecimals = dataset.numberFormats?.[feature] === "comma";
-          const values = numeric
-            ? cutpoints.split(commaDecimals ? /[;\n]+/ : /[,;\n]+/).map((value) => parseLocalizedNumber(value.trim(), dataset.numberFormats?.[feature])).filter((value): value is number => value !== null)
-            : categories;
-          if (!values.length) {
-            setError(numeric ? "Enter at least one numeric cut point." : "Choose at least one category.");
-            return;
-          }
-          setStatus("loading");
-          setError("");
-          try {
-            const result = await requestManualSplit(dataset, node.rowIndices ?? [], feature, values, !numeric, includeOther, missingDestination);
-            onApply(result, "insert");
-          } catch (reason) {
-            setError(reason instanceof Error ? reason.message : "The manual split could not be applied.");
-          } finally {
-            setStatus("idle");
-          }
-        }}>Insert above current split</button><p className="split-action-note">Reapplies the current subtree inside each new child wherever the data supports it.</p></>
+        <><button className="secondary-button split-insert-button" type="button" disabled={status === "loading" || !feature} onClick={() => apply("insert")}>Insert above current split</button><p className="split-action-note">Reapplies the current subtree inside each new child wherever the data supports it.</p></>
       )}
     </div>
   );

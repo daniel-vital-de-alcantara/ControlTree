@@ -54,7 +54,7 @@ function parsedSplit(value: unknown): TreeSplitDefinition | undefined {
     const missingDestination = split.missingDestination === "other" || split.missingDestination === "exclude" || typeof split.missingDestination === "number" && Number.isInteger(split.missingDestination) && split.missingDestination >= 0
       ? split.missingDestination as number | "other" | "exclude"
       : undefined;
-    return { kind: "manual", feature: split.feature, values: split.values, forceCategorical: split.forceCategorical === true, includeOther: split.includeOther !== false, ...(missingDestination !== undefined ? { missingDestination } : {}) };
+    return { kind: "manual", feature: split.feature, values: split.values, forceCategorical: split.forceCategorical === true, includeOther: split.includeOther !== false, ...(missingDestination !== undefined ? { missingDestination } : {}), ...(isPrimitive(split.missingValue) ? { missingValue: split.missingValue } : {}) };
   }
   throw new Error("The copied split is invalid.");
 }

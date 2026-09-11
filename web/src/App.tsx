@@ -714,7 +714,7 @@ export default function App() {
             ControlTree
           </a>
         </header>
-        <DataSetup onContinue={handleDataset} onResume={handleResume} onUseDemo={handleDemo} />
+        <DataSetup onContinue={handleDataset} onResume={handleResume} onUseSample={handleDataset} />
       </div>
     );
   }
@@ -1268,6 +1268,7 @@ export default function App() {
                   summaries={nodeSummaries}
                   nodeFields={nodeFields}
                   rootSamples={tree.samples}
+                  layout={appearance.layout}
                 />
               </div>
             </div>

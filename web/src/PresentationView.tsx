@@ -121,6 +121,7 @@ export function PresentationView({ onExit }: { onExit?: () => void } = {}) {
               onSelectNode={() => undefined}
               summaries={state.summaries}
               nodeFields={state.nodeFields ?? defaultNodeFields}
+              layout={state.appearance.layout}
             />
           </div>
         </main>

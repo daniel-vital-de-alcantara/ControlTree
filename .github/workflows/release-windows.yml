@@ -70,7 +70,7 @@ jobs:
           body: |
             ControlTree's interactive browser and desktop workbench.
 
-            This release makes complex analytical trees substantially more flexible and presentation-ready. Empty branches are now valid, visibly muted, ignored by quality tests, and preserved while replaying or copying compatible subtrees. Manual splits can search every categorical value without freezing the canvas and explicitly route missing values. Metrics can combine two calculations such as `500K (53%)` or `10 – 80`, row counts can include root or parent shares, and compact node cards align labels and values cleanly. Percentile splits now support 2–20 equal groups or exact custom cuts such as 90%, 95%, 99%, and 99.9%. Tree image export, text sizing, and node-spacing controls are also improved.
+            This release adds an offline sample-data gallery to the opening screen. Start immediately with a 2,000-row fictional retail credit-risk dataset or the attributed 4,521-row UCI Bank Marketing sample. Both use the full ControlTree analysis engine, include a suggested target, and are bundled into the website, desktop packages, and Python ZIP without making a network request. It also preserves compatible descendant splits when replacing an earlier split, simplifies missing-value routing in manual splits, and adds a compact layered tree layout.
 
             - **Setup** installs ControlTree and adds normal Windows shortcuts.
             - **Portable EXE** runs without installation after download.

@@ -91,6 +91,14 @@ describe("private browser calculation engine", () => {
     expect(split.branches.map((branch) => branch.count)).toEqual([1, 2]);
   });
 
+  it("treats missing numeric values as a concrete value", async () => {
+    const dataset = normalizeTable([["age"], [18], [45], [null]], "ages.csv");
+    const split = await requestManualSplit(dataset, [0, 1, 2], "age", [30], false, true, undefined, 35);
+    expect(split.branches.map((branch) => branch.label)).toEqual(["<=30", ">30 + missing as 35"]);
+    expect(split.branches.map((branch) => branch.count)).toEqual([1, 2]);
+    expect(split.definition).toMatchObject({ missingValue: 35 });
+  });
+
   it("replays a saved tree entirely in the browser", async () => {
     const dataset = normalizeTable([
       ["age", "outcome"],

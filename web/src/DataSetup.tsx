@@ -6,6 +6,7 @@ import {
 } from "./dataset";
 import { pickDatasetFile } from "./file-picker";
 import { readProjectFile, type ControlTreeProject } from "./project-file";
+import { loadSampleDataset, sampleDatasets, type SampleDatasetDefinition } from "./sample-datasets";
 
 export type DatasetSelection = {
   dataset: ParsedDataset;
@@ -15,10 +16,10 @@ export type DatasetSelection = {
 type Props = {
   onContinue: (selection: DatasetSelection) => void;
   onResume: (selection: DatasetSelection, project: ControlTreeProject, projectFileName: string) => Promise<void>;
-  onUseDemo: () => void;
+  onUseSample: (selection: DatasetSelection) => void;
 };
 
-export function DataSetup({ onContinue, onResume, onUseDemo }: Props) {
+export function DataSetup({ onContinue, onResume, onUseSample }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const [dataset, setDataset] = useState<ParsedDataset | null>(null);
@@ -28,6 +29,7 @@ export function DataSetup({ onContinue, onResume, onUseDemo }: Props) {
   const [readingExcel, setReadingExcel] = useState(false);
   const [readSeconds, setReadSeconds] = useState(0);
   const [isResuming, setIsResuming] = useState(false);
+  const [loadingSampleId, setLoadingSampleId] = useState<SampleDatasetDefinition["id"] | null>(null);
   const [pendingProject, setPendingProject] = useState<{ project: ControlTreeProject; fileName: string } | null>(null);
 
   useEffect(() => {
@@ -119,6 +121,21 @@ export function DataSetup({ onContinue, onResume, onUseDemo }: Props) {
     }
   }
 
+  async function handleSample(sample: SampleDatasetDefinition) {
+    setLoadingSampleId(sample.id);
+    setError("");
+    try {
+      const sampleDataset = await loadSampleDataset(sample.id);
+      setDataset(sampleDataset);
+      if (pendingProject) await resumeProject(sampleDataset, pendingProject.project, pendingProject.fileName);
+      else onUseSample({ dataset: sampleDataset, recommendationTarget: sample.target });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The sample dataset could not be opened.");
+    } finally {
+      setLoadingSampleId(null);
+    }
+  }
+
   return (
     <main className="setup-page">
       <section className="setup-intro">
@@ -192,7 +209,28 @@ export function DataSetup({ onContinue, onResume, onUseDemo }: Props) {
           <span aria-hidden="true">↗</span>
         </button>
 
-        <button className="demo-button" type="button" onClick={onUseDemo}>Or explore with the Titanic demo</button>
+        <div className="sample-heading">
+          <span>Try sample data</span>
+          <small>Included with ControlTree · works offline</small>
+        </div>
+        <div className="sample-grid">
+          {sampleDatasets.map((sample) => (
+            <article className={`sample-card${sample.featured ? " sample-card--featured" : ""}`} key={sample.id}>
+              <button type="button" disabled={Boolean(loadingSampleId) || isReading || isResuming} onClick={() => void handleSample(sample)}>
+                <span className="sample-card__eyebrow">{sample.eyebrow}</span>
+                <strong>{loadingSampleId === sample.id ? "Opening sample…" : sample.title}</strong>
+                <p>{sample.description}</p>
+                <span className="sample-card__meta">{sample.sizeLabel} · Target: {sample.targetLabel}</span>
+                <span className="sample-card__open">Open sample <span aria-hidden="true">→</span></span>
+              </button>
+              <footer>
+                {sample.sourceUrl ? <a href={sample.sourceUrl} target="_blank" rel="noreferrer">{sample.sourceLabel} ↗</a> : <span>{sample.sourceLabel}</span>}
+                <span>{sample.license}</span>
+              </footer>
+            </article>
+          ))}
+        </div>
+        <p className="sample-disclaimer">Sample datasets are for demonstration and education, not production credit decisions.</p>
       </section>
     </main>
   );

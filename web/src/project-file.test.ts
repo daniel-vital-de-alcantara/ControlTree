@@ -47,6 +47,14 @@ describe("ControlTree project files", () => {
     expect(parseProjectText(JSON.stringify(createProject(customPercentileTree, null, defaultAppearance, defaultNodeFields, []))).tree.split).toEqual(customPercentileTree.split);
   });
 
+  it("preserves a concrete missing-value treatment in manual splits", () => {
+    const manualTree: TreeNode = {
+      ...tree,
+      split: { kind: "manual", feature: "age", values: [30], forceCategorical: false, includeOther: true, missingValue: 35 },
+    };
+    expect(parseProjectText(JSON.stringify(createProject(manualTree, null, defaultAppearance, defaultNodeFields, []))).tree.split).toEqual(manualTree.split);
+  });
+
   it("preserves custom metric labels and display formats", () => {
     const fields = { ...defaultNodeFields, rowCountFormat: "count" as const, rowCountSecondaryFormat: "percent_parent" as const };
     const project = createProject(tree, "outcome", defaultAppearance, fields, [
@@ -91,6 +99,7 @@ describe("ControlTree project files", () => {
     delete legacyAppearance.showGrid;
     delete legacyAppearance.fontScale;
     delete legacyAppearance.nodeSpacing;
+    delete legacyAppearance.layout;
 
     const parsed = parseProjectText(JSON.stringify(legacy));
     expect(parsed.nodeFields).toEqual(defaultNodeFields);
@@ -98,12 +107,13 @@ describe("ControlTree project files", () => {
     expect(parsed.appearance.showGrid).toBe(true);
     expect(parsed.appearance.fontScale).toBe(1);
     expect(parsed.appearance.nodeSpacing).toBe(1);
+    expect(parsed.appearance.layout).toBe("tidy");
     expect(parsed.targetSettings).toEqual(defaultTargetSettings);
   });
 
   it("stores and safely bounds tree readability settings", () => {
-    const project = createProject(tree, null, { ...defaultAppearance, fontScale: 1.3, nodeSpacing: .75 }, defaultNodeFields, []);
-    expect(parseProjectText(JSON.stringify(project)).appearance).toMatchObject({ fontScale: 1.3, nodeSpacing: .75 });
+    const project = createProject(tree, null, { ...defaultAppearance, fontScale: 1.3, nodeSpacing: .75, layout: "compact" }, defaultNodeFields, []);
+    expect(parseProjectText(JSON.stringify(project)).appearance).toMatchObject({ fontScale: 1.3, nodeSpacing: .75, layout: "compact" });
 
     const extreme = JSON.parse(JSON.stringify(project)) as { appearance: { fontScale: number; nodeSpacing: number } };
     extreme.appearance.fontScale = 10;

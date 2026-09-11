@@ -105,6 +105,13 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
             <small>Turn this off for a clean, solid screenshot background.</small>
           </span>
         </label>
+        <div className="layout-mode-setting">
+          <span><strong>Tree layout</strong><small>Compact layout aligns each depth closely; tidy layout protects each subtree's space.</small></span>
+          <div role="group" aria-label="Tree layout">
+            <button className={appearance.layout === "tidy" ? "active" : ""} type="button" onClick={() => onAppearanceChange({ ...appearance, layout: "tidy" })}>Tidy</button>
+            <button className={appearance.layout === "compact" ? "active" : ""} type="button" onClick={() => onAppearanceChange({ ...appearance, layout: "compact" })}>Compact</button>
+          </div>
+        </div>
         <div className="appearance-sliders">
           <label className="appearance-slider">
             <span><strong>Text size</strong><small>Increase readability in presentations and exports.</small></span>

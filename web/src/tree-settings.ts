@@ -10,6 +10,7 @@ export type TreeAppearance = {
   showGrid: boolean;
   fontScale: number;
   nodeSpacing: number;
+  layout: "tidy" | "compact";
 };
 
 export type NodeFieldVisibility = {
@@ -47,6 +48,7 @@ export const defaultAppearance: TreeAppearance = {
   showGrid: true,
   fontScale: 1,
   nodeSpacing: 1,
+  layout: "tidy",
 };
 
 export const defaultNodeFields: NodeFieldVisibility = {

@@ -156,6 +156,7 @@ function parseSplit(value: unknown): TreeSplitDefinition {
       ...(split.missingDestination === "other" || split.missingDestination === "exclude" || typeof split.missingDestination === "number" && Number.isInteger(split.missingDestination) && split.missingDestination >= 0
         ? { missingDestination: split.missingDestination as number | "other" | "exclude" }
         : {}),
+      ...(isPrimitive(split.missingValue) ? { missingValue: split.missingValue } : {}),
     };
   }
   throw new Error("This file contains an unsupported split type.");
@@ -324,6 +325,7 @@ export function parseProjectText(text: string): ControlTreeProject {
       showGrid: typeof appearance.showGrid === "boolean" ? appearance.showGrid : defaultAppearance.showGrid,
       fontScale,
       nodeSpacing,
+      layout: appearance.layout === "compact" ? "compact" : "tidy",
     },
     nodeFields,
     summaries,

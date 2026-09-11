@@ -67,7 +67,24 @@ pip install -e .[dev]
 
 ## Example Data
 
-The package exposes a `load_titanic()` helper backed by `seaborn.load_dataset("titanic")` for local experimentation and demos.
+The opening screen includes two banking datasets that work offline and use the
+same browser analysis engine as uploaded files:
+
+- **ControlTree Credit Risk Demo** contains 2,000 deterministic, fictional
+  retail customers. It is designed for learning ControlTree and must not be
+  used for real credit decisions.
+- **UCI Bank Marketing** contains 4,521 records from marketing campaigns by a
+  Portuguese banking institution, with term-deposit subscription as its
+  suggested target. It is redistributed under
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) with attribution to
+  Moro, Rita, and Cortez (2014),
+  [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/222/bank%2Bmarketing),
+  DOI: 10.24432/C5K306.
+
+Both are bundled into the website, Windows packages, and Python ZIP. Choosing a
+sample does not contact UCI or any other server. The Python package also exposes
+a `load_titanic()` helper backed by `seaborn.load_dataset("titanic")` for local
+experimentation.
 
 ## Documentation
 
@@ -82,7 +99,8 @@ When recommended splits are needed, an optional recommendation target is chosen
 inside the Node inspector. Categorical targets are ranked by Gini gain and
 continuous targets by variance reduction. Split scoring, manual branching, and
 saved-tree replay all run in the browser: uploaded rows never leave the user's
-device. The Titanic demo remains available without an upload.
+device. The built-in credit-risk and bank-marketing samples remain available
+without an upload or internet connection.
 
 The Split tool supports recommended binary splits, manual numeric or
 categorical multiway splits, reproducible random sample groups, and percentile

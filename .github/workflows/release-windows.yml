@@ -70,11 +70,11 @@ jobs:
           body: |
             ControlTree's interactive browser and desktop workbench.
 
-            This release gives the workspace a more map-like, canvas-first interface. The tool strip now sits at the lower left and expands into a connected bottom drawer, project status stays compact until hovered, wheel and touch gestures control the canvas, and Fit Tree remains close at hand. Press **R** at any time outside an editor to reset the visual canvas without changing the tree.
+            This update redesigns the opening experience around two clear paths: **New tree** and **Existing tree**. Dataset selection and bundled sample data now appear only within the new-tree flow, while saved projects have a dedicated restoration flow. The complete opening screen now scrolls correctly on phones.
 
-            Branches can now be arranged without changing their data. Drag one sibling node onto another for a custom per-split order, or use Tree Settings to keep the original split order, place the highest displayed target metric on the left, or place it on the right. These choices are saved in the project and respected by presentation and image export.
+            The Python version now uses a stable local address and can reuse the last matching dataset in Chrome or Edge when the browser retains file permission. It stores only the browser's permission-safe file handle, not a second copy of the dataset.
 
-            Mobile safe-area handling has also been improved so the canvas and controls extend cleanly around modern phone screen insets.
+            Compact-layout connectors have been corrected at every zoom level. The project status is now a calm, single-line chip at the upper left, hides while the tool drawer needs the space, and expands more smoothly. Fit Tree is represented by a centered Maps-style navigation arrow.
 
             - **Setup** installs ControlTree and adds normal Windows shortcuts.
             - **Portable EXE** runs without installation after download.

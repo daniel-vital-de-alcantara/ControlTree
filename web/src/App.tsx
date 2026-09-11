@@ -1345,7 +1345,7 @@ export default function App() {
             </div>
             <div ref={viewControlsRef} className="canvas-controls keyboard-region" data-keyboard-region="view" role="toolbar" aria-label="Canvas view controls">
               <button data-view-index="0" tabIndex={0} onFocus={() => setViewFocusIndex(0)} type="button" onClick={fitTreeToView} aria-label="Fit tree to view" data-tooltip="Fit tree to view · F">
-                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5"/></svg>
+                <svg className="canvas-controls__locate" aria-hidden="true" viewBox="0 0 24 24"><path d="M4.25 11.15 20 4l-7.15 15.75-2.18-6.42-6.42-2.18Z"/></svg>
               </button>
             </div>
           </div>

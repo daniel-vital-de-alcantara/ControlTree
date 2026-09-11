@@ -45,7 +45,7 @@ def create_server(app_dir: Path, port: int = 0) -> ThreadingHTTPServer:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Start ControlTree in your browser.")
     parser.add_argument("--no-browser", action="store_true", help="Do not open a browser automatically.")
-    parser.add_argument("--port", type=int, default=0, help="Local port to use; the default chooses a free port.")
+    parser.add_argument("--port", type=int, default=4173, help="Local port to use; the default is 4173.")
     return parser.parse_args()
 
 
@@ -67,6 +67,8 @@ def main() -> int:
         server = create_server(app_dir, args.port)
     except OSError as exc:
         print(f"ERROR: ControlTree could not start its local server: {exc}", flush=True)
+        if args.port == 4173:
+            print("Port 4173 is already in use. Close another ControlTree window and try again.", flush=True)
         return 1
 
     port = server.server_address[1]

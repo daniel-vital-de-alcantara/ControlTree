@@ -130,6 +130,8 @@ function CompactTreeCanvas({ node, selectedNodeId, keyboardFocusedNodeId, onSele
       const container = containerRef.current;
       if (!container) return;
       const origin = container.getBoundingClientRect();
+      const scaleX = origin.width && container.offsetWidth ? origin.width / container.offsetWidth : 1;
+      const scaleY = origin.height && container.offsetHeight ? origin.height / container.offsetHeight : 1;
       const next: Array<{ id: string; path: string }> = [];
       levels.flat().forEach(({ node: child, parentId }) => {
         if (!parentId) return;
@@ -138,10 +140,10 @@ function CompactTreeCanvas({ node, selectedNodeId, keyboardFocusedNodeId, onSele
         if (!parentElement || !childElement) return;
         const parent = parentElement.getBoundingClientRect();
         const target = childElement.getBoundingClientRect();
-        const startX = parent.left + parent.width / 2 - origin.left;
-        const startY = parent.bottom - origin.top;
-        const endX = target.left + target.width / 2 - origin.left;
-        const endY = target.top - origin.top;
+        const startX = (parent.left + parent.width / 2 - origin.left) / scaleX;
+        const startY = (parent.bottom - origin.top) / scaleY;
+        const endX = (target.left + target.width / 2 - origin.left) / scaleX;
+        const endY = (target.top - origin.top) / scaleY;
         const middleY = startY + (endY - startY) / 2;
         next.push({ id: `${parentId}-${child.id}`, path: `M${startX},${startY} V${middleY} H${endX} V${endY}` });
       });

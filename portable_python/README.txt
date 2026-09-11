@@ -18,6 +18,12 @@ The launcher starts a private web server that listens only on this computer,
 then opens ControlTree in the default browser. Dataset processing happens in
 the browser and uploaded rows are not sent to GitHub or another server.
 
+When Chrome or Edge grants access through its modern file picker, ControlTree
+remembers the last dataset handle on this local address. Opening a matching
+saved project can then reconnect that dataset automatically without storing a
+second copy of the data inside the ControlTree folder. The browser may ask for
+access again if its permissions or site data have been cleared.
+
 Troubleshooting
 ---------------
 If Python is not detected, install 64-bit Python 3.10 or newer and enable the

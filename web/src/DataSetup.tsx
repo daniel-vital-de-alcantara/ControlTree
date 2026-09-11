@@ -4,7 +4,7 @@ import {
   parseDatasetFile,
   type ParsedDataset,
 } from "./dataset";
-import { pickDatasetFile } from "./file-picker";
+import { pickDatasetFile, rememberedDatasetFile } from "./file-picker";
 import { readProjectFile, type ControlTreeProject } from "./project-file";
 import { loadSampleDataset, sampleDatasets, type SampleDatasetDefinition } from "./sample-datasets";
 
@@ -31,6 +31,7 @@ export function DataSetup({ onContinue, onResume, onUseSample }: Props) {
   const [isResuming, setIsResuming] = useState(false);
   const [loadingSampleId, setLoadingSampleId] = useState<SampleDatasetDefinition["id"] | null>(null);
   const [pendingProject, setPendingProject] = useState<{ project: ControlTreeProject; fileName: string } | null>(null);
+  const [setupMode, setSetupMode] = useState<"choose" | "new" | "existing">("choose");
 
   useEffect(() => {
     if (!isReading) return;
@@ -42,7 +43,7 @@ export function DataSetup({ onContinue, onResume, onUseSample }: Props) {
     return () => window.clearInterval(timer);
   }, [isReading]);
 
-  async function readDataset(file: File) {
+  async function readDataset(file: File, projectToResume = pendingProject) {
     setIsReading(true);
     setReadingFileName(file.name);
     setReadingExcel(file.name.toLowerCase().endsWith(".xlsx"));
@@ -50,7 +51,7 @@ export function DataSetup({ onContinue, onResume, onUseSample }: Props) {
     try {
       const parsed = await parseDatasetFile(file);
       setDataset(parsed);
-      if (pendingProject) await resumeProject(parsed, pendingProject.project, pendingProject.fileName);
+      if (projectToResume) await resumeProject(parsed, projectToResume.project, projectToResume.fileName);
     } catch (reason) {
       setDataset(null);
       setError(reason instanceof Error ? reason.message : "The file could not be read.");
@@ -115,10 +116,28 @@ export function DataSetup({ onContinue, onResume, onUseSample }: Props) {
     try {
       const project = await readProjectFile(file);
       if (dataset) await resumeProject(dataset, project, file.name);
-      else setPendingProject({ project, fileName: file.name });
+      else {
+        const rememberedDataset = await rememberedDatasetFile(project);
+        if (rememberedDataset) await readDataset(rememberedDataset, { project, fileName: file.name });
+        else setPendingProject({ project, fileName: file.name });
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The saved tree could not be opened.");
     }
+  }
+
+  function chooseMode(mode: "new" | "existing") {
+    setSetupMode(mode);
+    setError("");
+    setPendingProject(null);
+    if (mode === "existing") setDataset(null);
+  }
+
+  function returnToChoice() {
+    setSetupMode("choose");
+    setError("");
+    setPendingProject(null);
+    setDataset(null);
   }
 
   async function handleSample(sample: SampleDatasetDefinition) {
@@ -139,98 +158,159 @@ export function DataSetup({ onContinue, onResume, onUseSample }: Props) {
   return (
     <main className="setup-page">
       <section className="setup-intro">
-        <p className="kicker">New decision tree</p>
-        <h1>Start with your data.</h1>
-        <p>Choose a CSV or Excel workbook. Your data stays in this browser and is never uploaded.</p>
+        <p className="kicker">{setupMode === "new" ? "New tree" : setupMode === "existing" ? "Existing tree" : "ControlTree"}</p>
+        <h1>{setupMode === "new" ? "Choose your data." : setupMode === "existing" ? "Continue your work." : "Where would you like to start?"}</h1>
+        <p>{setupMode === "new"
+          ? "Use your own CSV or Excel workbook, or begin with an included sample."
+          : setupMode === "existing"
+            ? "Open a saved ControlTree project. Your data remains on this device."
+            : "Build a new decision tree or return to one you have already saved. Your data is processed privately on this device."}</p>
       </section>
 
       <section className="setup-card" aria-label="Dataset setup">
-        <div className="setup-step">
-          <span className="step-number">01</span>
-          <div>
-            <h2>Choose a dataset</h2>
-            <p>Use the first row for column names. Excel imports use the first worksheet.</p>
+        {setupMode === "choose" && (
+          <div className="setup-routes">
+            <button className="setup-route setup-route--primary" type="button" onClick={() => chooseMode("new")}>
+              <span className="setup-route__icon" aria-hidden="true">＋</span>
+              <span><strong>New tree</strong><small>Choose a dataset or explore an included sample.</small></span>
+              <span aria-hidden="true">→</span>
+            </button>
+            <button className="setup-route" type="button" onClick={() => chooseMode("existing")}>
+              <span className="setup-route__icon" aria-hidden="true">↗</span>
+              <span><strong>Existing tree</strong><small>Open a saved .controltree.json project.</small></span>
+              <span aria-hidden="true">→</span>
+            </button>
+            <p className="setup-privacy-note">CSV, Excel, and project files stay on your device.</p>
           </div>
-        </div>
-
-        <input
-          ref={inputRef}
-          className="file-input"
-          type="file"
-          accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          onChange={handleFile}
-        />
-        <button className="upload-button" type="button" disabled={isReading || isResuming} onClick={chooseDataset}>
-          <span aria-hidden="true">↑</span>
-          <span>
-            <strong>{isReading ? `Reading ${readingFileName}… ${readSeconds}s` : pendingProject ? `Choose data for ${pendingProject.fileName}` : dataset?.fileName ?? "Choose CSV or Excel file"}</strong>
-            <small>{isReading ? "Preparing your local dataset" : pendingProject ? `Expected source: ${pendingProject.project.sourceFileName ?? "a compatible CSV or Excel file"}` : dataset ? `${dataset.rows.length.toLocaleString()} rows · ${dataset.columns.length} columns` : ".csv or .xlsx"}</small>
-          </span>
-        </button>
-
-        {isReading && readingExcel && readSeconds >= 5 && (
-          <p className="setup-import-tip" role="status">
-            Excel is taking longer to process. Saving the worksheet as CSV is normally much faster.
-          </p>
         )}
 
-        {error && <p className="form-error" role="alert">{error}</p>}
+        {setupMode !== "choose" && (
+          <button className="setup-back" type="button" onClick={returnToChoice}><span aria-hidden="true">←</span> Start options</button>
+        )}
 
-        <button
-          className="primary-button setup-continue"
-          type="button"
-          disabled={!dataset || isReading}
-          onClick={handleContinue}
-        >
-          Open tree workspace
-          <span aria-hidden="true">→</span>
-        </button>
-        <p className="setup-target-note">After opening the workspace, ControlTree will guide you to choose an optional target and how it should be used.</p>
+        {setupMode === "new" && <>
+          <div className="setup-step">
+            <span className="step-number">01</span>
+            <div>
+              <h2>Use your own data</h2>
+              <p>Use the first row for column names. Excel imports use the first worksheet.</p>
+            </div>
+          </div>
 
-        <div className="setup-choice"><span>or</span></div>
+          <input
+            ref={inputRef}
+            className="file-input"
+            type="file"
+            accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={handleFile}
+          />
+          <button className="upload-button" type="button" disabled={isReading || isResuming} onClick={chooseDataset}>
+            <span aria-hidden="true">↑</span>
+            <span>
+              <strong>{isReading ? `Reading ${readingFileName}… ${readSeconds}s` : dataset?.fileName ?? "Choose CSV or Excel file"}</strong>
+              <small>{isReading ? "Preparing your local dataset" : dataset ? `${dataset.rows.length.toLocaleString()} rows · ${dataset.columns.length} columns` : ".csv or .xlsx"}</small>
+            </span>
+          </button>
 
-        <input
-          ref={projectInputRef}
-          className="file-input"
-          type="file"
-          accept=".json,application/json"
-          onChange={handleProject}
-        />
-        <button
-          className="resume-button"
-          type="button"
-          disabled={isReading || isResuming}
-          onClick={() => projectInputRef.current?.click()}
-        >
-          <span>
-            <strong>{isResuming ? "Rebuilding saved tree…" : pendingProject ? pendingProject.fileName : "Continue from a saved tree"}</strong>
-            <small>{pendingProject ? "Now choose its source dataset above" : "Choose a .controltree.json configuration"}</small>
-          </span>
-          <span aria-hidden="true">↗</span>
-        </button>
+          {isReading && readingExcel && readSeconds >= 5 && (
+            <p className="setup-import-tip" role="status">
+              Excel is taking longer to process. Saving the worksheet as CSV is normally much faster.
+            </p>
+          )}
 
-        <div className="sample-heading">
-          <span>Try sample data</span>
-          <small>Included with ControlTree · works offline</small>
-        </div>
-        <div className="sample-grid">
-          {sampleDatasets.map((sample) => (
-            <article className={`sample-card${sample.featured ? " sample-card--featured" : ""}`} key={sample.id}>
-              <button type="button" disabled={Boolean(loadingSampleId) || isReading || isResuming} onClick={() => void handleSample(sample)}>
-                <span className="sample-card__eyebrow">{sample.eyebrow}</span>
-                <strong>{loadingSampleId === sample.id ? "Opening sample…" : sample.title}</strong>
-                <p>{sample.description}</p>
-                <span className="sample-card__meta">{sample.sizeLabel} · Target: {sample.targetLabel}</span>
-                <span className="sample-card__open">Open sample <span aria-hidden="true">→</span></span>
-              </button>
-              <footer>
-                {sample.sourceUrl ? <a href={sample.sourceUrl} target="_blank" rel="noreferrer">{sample.sourceLabel} ↗</a> : <span>{sample.sourceLabel}</span>}
-                <span>{sample.license}</span>
-              </footer>
-            </article>
-          ))}
-        </div>
-        <p className="sample-disclaimer">Sample datasets are for demonstration and education, not production credit decisions.</p>
+          {error && <p className="form-error" role="alert">{error}</p>}
+
+          <button
+            className="primary-button setup-continue"
+            type="button"
+            disabled={!dataset || isReading}
+            onClick={handleContinue}
+          >
+            Create tree
+            <span aria-hidden="true">→</span>
+          </button>
+          <p className="setup-target-note">Next, ControlTree will guide you through the optional target and tree settings.</p>
+
+          <div className="sample-heading">
+            <span>Or start with a sample</span>
+            <small>Included with ControlTree · works offline</small>
+          </div>
+          <div className="sample-grid">
+            {sampleDatasets.map((sample) => (
+              <article className={`sample-card${sample.featured ? " sample-card--featured" : ""}`} key={sample.id}>
+                <button type="button" disabled={Boolean(loadingSampleId) || isReading || isResuming} onClick={() => void handleSample(sample)}>
+                  <span className="sample-card__eyebrow">{sample.eyebrow}</span>
+                  <strong>{loadingSampleId === sample.id ? "Opening sample…" : sample.title}</strong>
+                  <p>{sample.description}</p>
+                  <span className="sample-card__meta">{sample.sizeLabel} · Target: {sample.targetLabel}</span>
+                  <span className="sample-card__open">Open sample <span aria-hidden="true">→</span></span>
+                </button>
+                <footer>
+                  {sample.sourceUrl ? <a href={sample.sourceUrl} target="_blank" rel="noreferrer">{sample.sourceLabel} ↗</a> : <span>{sample.sourceLabel}</span>}
+                  <span>{sample.license}</span>
+                </footer>
+              </article>
+            ))}
+          </div>
+          <p className="sample-disclaimer">Sample datasets are for demonstration and education, not production credit decisions.</p>
+        </>}
+
+        {setupMode === "existing" && <>
+          <div className="setup-step">
+            <span className="step-number">01</span>
+            <div>
+              <h2>Choose your saved project</h2>
+              <p>ControlTree will restore its splits, metrics, colors, and other settings.</p>
+            </div>
+          </div>
+          <input
+            ref={projectInputRef}
+            className="file-input"
+            type="file"
+            accept=".json,application/json"
+            onChange={handleProject}
+          />
+          <button
+            className="resume-button resume-button--large"
+            type="button"
+            disabled={isReading || isResuming}
+            onClick={() => projectInputRef.current?.click()}
+          >
+            <span>
+              <strong>{isResuming ? "Rebuilding saved tree…" : pendingProject ? pendingProject.fileName : "Choose saved tree"}</strong>
+              <small>{pendingProject ? "Project opened—now reconnect its dataset below." : ".controltree.json project file"}</small>
+            </span>
+            <span aria-hidden="true">↗</span>
+          </button>
+
+          {pendingProject && <>
+            <div className="setup-step setup-step--followup">
+              <span className="step-number">02</span>
+              <div>
+                <h2>Reconnect the dataset</h2>
+                <p>The saved project expects {pendingProject.project.sourceFileName ?? "a compatible CSV or Excel file"}.</p>
+              </div>
+            </div>
+            <input
+              ref={inputRef}
+              className="file-input"
+              type="file"
+              accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={handleFile}
+            />
+            <button className="upload-button" type="button" disabled={isReading || isResuming} onClick={chooseDataset}>
+              <span aria-hidden="true">↑</span>
+              <span>
+                <strong>{isReading ? `Reading ${readingFileName}… ${readSeconds}s` : "Choose the source dataset"}</strong>
+                <small>{isReading ? "Rebuilding your saved tree" : pendingProject.project.sourceFileName ?? ".csv or .xlsx"}</small>
+              </span>
+            </button>
+            {isReading && readingExcel && readSeconds >= 5 && <p className="setup-import-tip" role="status">Excel is taking longer to process. CSV is normally much faster.</p>}
+          </>}
+
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <p className="setup-local-note">In the local Python version, Chrome or Edge can automatically reuse the last matching dataset after you have granted file access. GitHub Pages always asks you to reconnect it.</p>
+        </>}
       </section>
     </main>
   );

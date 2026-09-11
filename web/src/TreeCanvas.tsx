@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent } from "react";
 
 import type { TreeNode } from "./domain";
 import { defaultNodeFields, type NodeFieldVisibility, type NodeSummaryMap } from "./tree-settings";
@@ -10,6 +10,7 @@ type Props = {
   onSelectNode: (nodeId: string) => void;
   onKeyboardFocusNode?: (nodeId: string) => void;
   onNodeContextMenu?: (nodeId: string, x: number, y: number) => void;
+  onReorderNode?: (sourceNodeId: string, targetNodeId: string) => void;
   summaries?: NodeSummaryMap;
   nodeFields?: NodeFieldVisibility;
   rootSamples?: number;
@@ -33,13 +34,14 @@ export function rowCountLabel(node: TreeNode, nodeFields: NodeFieldVisibility, r
   return `${node.samples.toLocaleString()}${secondary} rows`;
 }
 
-function NodeCard({ node, selected, keyboardFocused, onSelect, onFocus, onContextMenu, summaries, nodeFields, rootSamples, parentSamples, depth, buttonRef }: {
+function NodeCard({ node, selected, keyboardFocused, onSelect, onFocus, onContextMenu, onReorder, summaries, nodeFields, rootSamples, parentSamples, depth, buttonRef }: {
   node: TreeNode;
   selected: boolean;
   keyboardFocused: boolean;
   onSelect: () => void;
   onFocus?: () => void;
   onContextMenu?: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onReorder?: (sourceNodeId: string, targetNodeId: string) => void;
   summaries?: NodeSummaryMap;
   nodeFields: NodeFieldVisibility;
   rootSamples: number;
@@ -47,13 +49,42 @@ function NodeCard({ node, selected, keyboardFocused, onSelect, onFocus, onContex
   depth: number;
   buttonRef?: (element: HTMLButtonElement | null) => void;
 }) {
+  const [dropTarget, setDropTarget] = useState(false);
+
+  function startDrag(event: ReactDragEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", node.id);
+  }
+
+  function acceptDrag(event: ReactDragEvent<HTMLButtonElement>) {
+    if (!onReorder) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTarget(true);
+  }
+
+  function dropNode(event: ReactDragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setDropTarget(false);
+    const sourceId = event.dataTransfer.getData("text/plain");
+    if (sourceId) onReorder?.(sourceId, node.id);
+  }
+
   return (
     <button
-      className={`node-card${node.samples === 0 ? " node-card--empty" : ""}${selected ? " node-card--selected" : ""}${keyboardFocused ? " node-card--keyboard-focused" : ""}`}
+      className={`node-card${node.samples === 0 ? " node-card--empty" : ""}${selected ? " node-card--selected" : ""}${keyboardFocused ? " node-card--keyboard-focused" : ""}${dropTarget ? " node-card--drop-target" : ""}`}
       data-node-id={node.id}
       onClick={onSelect}
       onFocus={onFocus}
       onContextMenu={onContextMenu}
+      draggable={Boolean(onReorder) && depth > 1}
+      onDragStart={startDrag}
+      onDragOver={acceptDrag}
+      onDragLeave={() => setDropTarget(false)}
+      onDrop={dropNode}
+      onDragEnd={() => setDropTarget(false)}
       tabIndex={keyboardFocused ? 0 : -1}
       role="treeitem"
       aria-level={depth}
@@ -88,7 +119,7 @@ function compactItems(root: TreeNode): CompactItem[][] {
   return levels;
 }
 
-function CompactTreeCanvas({ node, selectedNodeId, keyboardFocusedNodeId, onSelectNode, onKeyboardFocusNode, onNodeContextMenu, summaries, nodeFields, rootSamples }: Required<Pick<Props, "node" | "selectedNodeId" | "onSelectNode">> & Pick<Props, "keyboardFocusedNodeId" | "onKeyboardFocusNode" | "onNodeContextMenu" | "summaries"> & { nodeFields: NodeFieldVisibility; rootSamples: number }) {
+function CompactTreeCanvas({ node, selectedNodeId, keyboardFocusedNodeId, onSelectNode, onKeyboardFocusNode, onNodeContextMenu, onReorderNode, summaries, nodeFields, rootSamples }: Required<Pick<Props, "node" | "selectedNodeId" | "onSelectNode">> & Pick<Props, "keyboardFocusedNodeId" | "onKeyboardFocusNode" | "onNodeContextMenu" | "onReorderNode" | "summaries"> & { nodeFields: NodeFieldVisibility; rootSamples: number }) {
   const levels = useMemo(() => compactItems(node), [node]);
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -139,6 +170,7 @@ function CompactTreeCanvas({ node, selectedNodeId, keyboardFocusedNodeId, onSele
                 onSelect={() => onSelectNode(item.id)}
                 onFocus={onKeyboardFocusNode ? () => onKeyboardFocusNode(item.id) : undefined}
                 onContextMenu={onNodeContextMenu ? (event) => { event.preventDefault(); event.stopPropagation(); onNodeContextMenu(item.id, event.clientX, event.clientY); } : undefined}
+                onReorder={depth > 1 ? onReorderNode : undefined}
                 summaries={summaries}
                 nodeFields={nodeFields}
                 rootSamples={rootSamples}
@@ -155,8 +187,8 @@ function CompactTreeCanvas({ node, selectedNodeId, keyboardFocusedNodeId, onSele
   );
 }
 
-export function TreeCanvas({ node, selectedNodeId, keyboardFocusedNodeId, onSelectNode, onKeyboardFocusNode, onNodeContextMenu, summaries, nodeFields = defaultNodeFields, rootSamples = node.samples, parentSamples = node.samples, depth = 1, layout = "tidy" }: Props) {
-  if (depth === 1 && layout === "compact") return <CompactTreeCanvas node={node} selectedNodeId={selectedNodeId} keyboardFocusedNodeId={keyboardFocusedNodeId} onSelectNode={onSelectNode} onKeyboardFocusNode={onKeyboardFocusNode} onNodeContextMenu={onNodeContextMenu} summaries={summaries} nodeFields={nodeFields} rootSamples={rootSamples} />;
+export function TreeCanvas({ node, selectedNodeId, keyboardFocusedNodeId, onSelectNode, onKeyboardFocusNode, onNodeContextMenu, onReorderNode, summaries, nodeFields = defaultNodeFields, rootSamples = node.samples, parentSamples = node.samples, depth = 1, layout = "tidy" }: Props) {
+  if (depth === 1 && layout === "compact") return <CompactTreeCanvas node={node} selectedNodeId={selectedNodeId} keyboardFocusedNodeId={keyboardFocusedNodeId} onSelectNode={onSelectNode} onKeyboardFocusNode={onKeyboardFocusNode} onNodeContextMenu={onNodeContextMenu} onReorderNode={onReorderNode} summaries={summaries} nodeFields={nodeFields} rootSamples={rootSamples} />;
   return (
     <div className="tree" role={depth === 1 ? "tree" : "group"} aria-label={depth === 1 ? "Decision tree" : undefined} data-keyboard-region={depth === 1 ? "tree" : undefined}>
       <NodeCard
@@ -170,6 +202,7 @@ export function TreeCanvas({ node, selectedNodeId, keyboardFocusedNodeId, onSele
           event.stopPropagation();
           onNodeContextMenu(node.id, event.clientX, event.clientY);
         } : undefined}
+        onReorder={depth > 1 ? onReorderNode : undefined}
         summaries={summaries}
         nodeFields={nodeFields}
         rootSamples={rootSamples}
@@ -190,6 +223,7 @@ export function TreeCanvas({ node, selectedNodeId, keyboardFocusedNodeId, onSele
                   onSelectNode={onSelectNode}
                   onKeyboardFocusNode={onKeyboardFocusNode}
                   onNodeContextMenu={onNodeContextMenu}
+                  onReorderNode={onReorderNode}
                   summaries={summaries}
                   nodeFields={nodeFields}
                   rootSamples={rootSamples}

@@ -47,6 +47,11 @@ describe("keyboard shortcuts", () => {
     expect(shortcutForEvent(keyboard("Backspace"), "tree")?.id).toBe("delete");
   });
 
+  it("resets only the canvas view with plain R", () => {
+    expect(shortcutForEvent(keyboard("r"), "editor")?.id).toBe("reset-view");
+    expect(shortcutForEvent(keyboard("r", { ctrlKey: true }), "editor")).toBeUndefined();
+  });
+
   it("protects typing while still allowing Escape, Save, and Find", () => {
     class FakeElement {
       isContentEditable = false;

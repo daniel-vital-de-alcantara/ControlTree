@@ -100,6 +100,8 @@ describe("ControlTree project files", () => {
     delete legacyAppearance.fontScale;
     delete legacyAppearance.nodeSpacing;
     delete legacyAppearance.layout;
+    delete legacyAppearance.branchOrder;
+    delete legacyAppearance.customBranchOrders;
 
     const parsed = parseProjectText(JSON.stringify(legacy));
     expect(parsed.nodeFields).toEqual(defaultNodeFields);
@@ -108,6 +110,8 @@ describe("ControlTree project files", () => {
     expect(parsed.appearance.fontScale).toBe(1);
     expect(parsed.appearance.nodeSpacing).toBe(1);
     expect(parsed.appearance.layout).toBe("tidy");
+    expect(parsed.appearance.branchOrder).toBe("split");
+    expect(parsed.appearance.customBranchOrders).toEqual({});
     expect(parsed.targetSettings).toEqual(defaultTargetSettings);
   });
 
@@ -119,6 +123,15 @@ describe("ControlTree project files", () => {
     extreme.appearance.fontScale = 10;
     extreme.appearance.nodeSpacing = 0;
     expect(parseProjectText(JSON.stringify(extreme)).appearance).toMatchObject({ fontScale: 1.5, nodeSpacing: .6 });
+  });
+
+  it("stores automatic and dragged branch display orders", () => {
+    const appearance = {
+      ...defaultAppearance,
+      branchOrder: "target-high-left" as const,
+      customBranchOrders: { root: ["root.2", "root.1"] },
+    };
+    expect(parseProjectText(JSON.stringify(createProject(tree, "outcome", appearance, defaultNodeFields, []))).appearance).toMatchObject(appearance);
   });
 
   it("stores distribution settings without enabling presentation automatically", () => {

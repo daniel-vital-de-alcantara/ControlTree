@@ -229,6 +229,17 @@ export function parseProjectText(text: string): ControlTreeProject {
   const nodeSpacing = typeof appearance.nodeSpacing === "number" && Number.isFinite(appearance.nodeSpacing)
     ? Math.min(1.6, Math.max(.6, appearance.nodeSpacing))
     : defaultAppearance.nodeSpacing;
+  const branchOrder: TreeAppearance["branchOrder"] = appearance.branchOrder === "target-high-left" || appearance.branchOrder === "target-high-right"
+    ? appearance.branchOrder
+    : "split";
+  const customBranchOrders: Record<string, string[]> = {};
+  if (appearance.customBranchOrders && typeof appearance.customBranchOrders === "object" && !Array.isArray(appearance.customBranchOrders)) {
+    for (const [nodeId, order] of Object.entries(appearance.customBranchOrders as Record<string, unknown>)) {
+      if (nodeId && Array.isArray(order) && order.length >= 2 && order.every((item) => typeof item === "string")) {
+        customBranchOrders[nodeId] = [...new Set(order as string[])];
+      }
+    }
+  }
   if (!Array.isArray(project.summaries)) throw new Error("The saved summaries are invalid.");
   const summaries = project.summaries.map((item) => {
     if (!item || typeof item !== "object") throw new Error("A saved summary is invalid.");
@@ -326,6 +337,8 @@ export function parseProjectText(text: string): ControlTreeProject {
       fontScale,
       nodeSpacing,
       layout: appearance.layout === "compact" ? "compact" : "tidy",
+      branchOrder,
+      customBranchOrders,
     },
     nodeFields,
     summaries,

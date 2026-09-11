@@ -34,6 +34,8 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
   const nodeNameInputRef = useRef<HTMLInputElement>(null);
   const renameOriginalRef = useRef("");
   const renameCancelledRef = useRef(false);
+  const hasTargetMetric = metrics.some((metric) => metric.target);
+  const customBranchOrderCount = Object.keys(appearance.customBranchOrders).length;
 
   useEffect(() => {
     if (!renameRequestId || section !== "metrics" || !selectedNode) return;
@@ -112,6 +114,30 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
             <button className={appearance.layout === "compact" ? "active" : ""} type="button" onClick={() => onAppearanceChange({ ...appearance, layout: "compact" })}>Compact</button>
           </div>
         </div>
+        <label className="branch-order-setting">
+          <span>
+            <strong>Branch order</strong>
+            <small>Keep split cutpoints and categories in their defined order, or arrange siblings by the displayed target metric.</small>
+          </span>
+          <select
+            value={appearance.branchOrder}
+            onChange={(event) => onAppearanceChange({
+              ...appearance,
+              branchOrder: event.target.value as TreeAppearance["branchOrder"],
+              customBranchOrders: {},
+            })}
+          >
+            <option value="split">Split order (default)</option>
+            <option value="target-high-left" disabled={!hasTargetMetric}>Highest target on the left</option>
+            <option value="target-high-right" disabled={!hasTargetMetric}>Highest target on the right</option>
+          </select>
+          <small className="branch-order-setting__note">
+            {hasTargetMetric
+              ? "You can also drag one sibling node onto another to create a custom order for that split. Choosing an automatic order again clears custom arrangements."
+              : "Define and show a target metric to enable target-based ordering. You can still drag sibling nodes into a custom order."}
+            {customBranchOrderCount ? ` ${customBranchOrderCount} split${customBranchOrderCount === 1 ? " has" : "s have"} a custom order.` : ""}
+          </small>
+        </label>
         <div className="appearance-sliders">
           <label className="appearance-slider">
             <span><strong>Text size</strong><small>Increase readability in presentations and exports.</small></span>

@@ -26,6 +26,7 @@ import { TargetPane } from "./TargetPane";
 import { defaultTargetSettings, type TargetSettings } from "./target-settings";
 import { fetchSplitSuggestions } from "./suggestions";
 import { buildNodeSummaries, defaultAppearance, defaultNodeFields, isNumericVariable, type NodeFieldVisibility, type SummaryMetric, type TreeAppearance } from "./tree-settings";
+import { moveDisplayedSibling, orderTreeForDisplay } from "./tree-order";
 import { visibleTree } from "./tree-visibility";
 
 export default function App() {
@@ -93,6 +94,13 @@ export default function App() {
     originY: number;
     moved: boolean;
   } | null>(null);
+  const touchPointsRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{
+    startDistance: number;
+    worldX: number;
+    worldY: number;
+    originScale: number;
+  } | null>(null);
   const paneResizeRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const candidates = selection === "demo"
     ? selectedNodeId === "root" ? splitCandidates : []
@@ -125,11 +133,17 @@ export default function App() {
   ) : null, [selection, tree, recommendationTarget, appearance, nodeFields, summaryMetrics, activeDistributionSettings, uploadedDataset, targetSettings, nodeNameHistory]);
   const projectFingerprint = projectSnapshot ? fingerprintProject(projectSnapshot) : "";
   const isDirty = savedProjectFingerprint !== projectFingerprint;
+  const displayProjectFileName = projectFileName.replace(/\.controltree\.json$/i, "").replace(/\.json$/i, "");
   const nodeSummaries = useMemo(
     () => buildNodeSummaries(tree, uploadedDataset, summaryMetrics),
     [tree, uploadedDataset, summaryMetrics],
   );
-  const canvasTree = useMemo(() => visibleTree(tree, focusNodeId, collapsedNodeIds), [tree, focusNodeId, collapsedNodeIds]);
+  const visibleCanvasTree = useMemo(() => visibleTree(tree, focusNodeId, collapsedNodeIds), [tree, focusNodeId, collapsedNodeIds]);
+  const targetMetric = summaryMetrics.find((metric) => metric.target);
+  const canvasTree = useMemo(
+    () => orderTreeForDisplay(visibleCanvasTree, appearance, uploadedDataset, targetMetric),
+    [visibleCanvasTree, appearance, uploadedDataset, targetMetric],
+  );
   const findMatches = useMemo(() => {
     const nodes: TreeNode[] = [];
     const visit = (node: TreeNode) => { nodes.push(node); node.children.forEach(visit); };
@@ -285,6 +299,7 @@ export default function App() {
     if (id === "zoom-in") { zoomAt(viewport.scale * 1.2); return; }
     if (id === "zoom-out") { zoomAt(viewport.scale / 1.2); return; }
     if (id === "fit") { fitTreeToView(); return; }
+    if (id === "reset-view") { setViewport({ x: 0, y: 0, scale: 1 }); setActionNotice("Canvas view reset."); return; }
     if (id === "select-all") { setSelectedNodeId(tree.id); focusNodeCard(tree.id); setActionNotice("The whole tree is selected through its root node."); return; }
     if (id === "activate") { if (node) selectNode(node.id); return; }
     if (id === "context-menu" && node) {
@@ -763,6 +778,16 @@ export default function App() {
     setHelpOpen(false);
   }
 
+  function reorderSiblingNode(sourceNodeId: string, targetNodeId: string) {
+    const nextAppearance = moveDisplayedSibling(canvasTree, appearance, sourceNodeId, targetNodeId);
+    if (nextAppearance === appearance) {
+      setActionNotice("Nodes can only be reordered inside the same split.");
+      return;
+    }
+    setAppearance(nextAppearance);
+    setActionNotice("Branch order updated.");
+  }
+
   function openNodeContextMenu(nodeId: string, x: number, y: number) {
     setSelectedNodeId(nodeId);
     setContextMenu({
@@ -1013,7 +1038,26 @@ export default function App() {
 
   function handleCanvasPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
-    if (event.button !== 0 || target.closest("button, a, input, select, textarea, summary")) return;
+    if (event.button !== 0 || (event.pointerType !== "touch" && target.closest("button, a, input, select, textarea, summary"))) return;
+    if (event.pointerType === "touch") {
+      touchPointsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    if (touchPointsRef.current.size >= 2) {
+      const [first, second] = [...touchPointsRef.current.values()].slice(0, 2);
+      const rect = event.currentTarget.getBoundingClientRect();
+      const centerX = (first.x + second.x) / 2 - rect.left;
+      const centerY = (first.y + second.y) / 2 - rect.top;
+      pinchRef.current = {
+        startDistance: Math.max(1, Math.hypot(second.x - first.x, second.y - first.y)),
+        worldX: (centerX - viewport.x) / viewport.scale,
+        worldY: (centerY - viewport.y) / viewport.scale,
+        originScale: viewport.scale,
+      };
+      dragRef.current = null;
+      setIsPanning(true);
+      return;
+    }
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -1022,11 +1066,24 @@ export default function App() {
       originY: viewport.y,
       moved: false,
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
     setIsPanning(true);
   }
 
   function handleCanvasPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "touch" && touchPointsRef.current.has(event.pointerId)) {
+      touchPointsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      const pinch = pinchRef.current;
+      if (pinch && touchPointsRef.current.size >= 2) {
+        const [first, second] = [...touchPointsRef.current.values()].slice(0, 2);
+        const rect = event.currentTarget.getBoundingClientRect();
+        const centerX = (first.x + second.x) / 2 - rect.left;
+        const centerY = (first.y + second.y) / 2 - rect.top;
+        const distance = Math.max(1, Math.hypot(second.x - first.x, second.y - first.y));
+        const scale = Math.min(2.5, Math.max(.35, pinch.originScale * distance / pinch.startDistance));
+        setViewport({ x: centerX - pinch.worldX * scale, y: centerY - pinch.worldY * scale, scale });
+        return;
+      }
+    }
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     const deltaX = event.clientX - drag.startX;
@@ -1036,9 +1093,21 @@ export default function App() {
   }
 
   function finishCanvasPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    const wasPinching = Boolean(pinchRef.current);
+    if (event.pointerType === "touch") touchPointsRef.current.delete(event.pointerId);
+    if (wasPinching) {
+      if (touchPointsRef.current.size < 2) pinchRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      setIsPanning(false);
+      return;
+    }
     const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    if (!drag.moved) {
+    if (!drag || drag.pointerId !== event.pointerId) {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      setIsPanning(false);
+      return;
+    }
+    if (!drag.moved && event.type === "pointerup") {
       setInspectorOpen(false);
       setHelpOpen(false);
       setSelectedNodeId("");
@@ -1060,7 +1129,8 @@ export default function App() {
     const resize = paneResizeRef.current;
     if (!resize || resize.pointerId !== event.pointerId) return;
     const maximum = Math.max(320, Math.min(720, window.innerWidth - 32));
-    setPaneWidth(Math.min(maximum, Math.max(320, resize.startWidth + resize.startX - event.clientX)));
+    const minimum = Math.min(390, window.innerWidth - 32);
+    setPaneWidth(Math.min(maximum, Math.max(minimum, resize.startWidth + event.clientX - resize.startX)));
   }
 
   function finishPaneResize(event: ReactPointerEvent<HTMLDivElement>) {
@@ -1181,7 +1251,7 @@ export default function App() {
                   : { title: "Split", description: "Choose a recommended split or define exactly how the selected node should branch." };
 
   return (
-    <div className="app-shell app-shell--workspace">
+    <div className={`app-shell app-shell--workspace${inspectorOpen || helpOpen ? " app-shell--drawer-open" : ""}`} style={{ "--pane-width": `${paneWidth}px` } as CSSProperties}>
       <div className="workspace-context" aria-label="Current project">
         <a className="brand" href="#" tabIndex={-1} aria-label="Return to the ControlTree home screen" onClick={(event) => { event.preventDefault(); handleGoHome(); }}>
           <span className="brand__mark" aria-hidden="true">⌁</span>
@@ -1190,7 +1260,7 @@ export default function App() {
         <span className="workspace-context__divider" />
         <button className={`workspace-project${isDirty ? " workspace-project--dirty" : ""}`} tabIndex={-1} type="button" onClick={handleSave} aria-label={`Save ${projectFileName}; ${isDirty ? "unsaved changes" : "currently saved"}`}>
           <span aria-hidden="true">●</span>
-          <strong>{projectFileName}</strong>
+          <strong>{displayProjectFileName}</strong>
           <small>{isDirty ? "Unsaved changes" : "Saved"}</small>
         </button>
       </div>
@@ -1265,6 +1335,7 @@ export default function App() {
                   onSelectNode={selectNode}
                   onKeyboardFocusNode={setKeyboardNodeId}
                   onNodeContextMenu={openNodeContextMenu}
+                  onReorderNode={reorderSiblingNode}
                   summaries={nodeSummaries}
                   nodeFields={nodeFields}
                   rootSamples={tree.samples}
@@ -1272,12 +1343,10 @@ export default function App() {
                 />
               </div>
             </div>
-            <div ref={viewControlsRef} className="canvas-controls keyboard-region" data-keyboard-region="view" role="toolbar" aria-label="Canvas view controls" onKeyDown={(event) => handleRovingKeys(event, "button", viewFocusIndex, setViewFocusIndex)}>
-              <button data-view-index="0" tabIndex={viewFocusIndex === 0 ? 0 : -1} onFocus={() => setViewFocusIndex(0)} type="button" onClick={() => zoomAt(viewport.scale / 1.2)} aria-label="Zoom out">−</button>
-              <span>{Math.round(viewport.scale * 100)}%</span>
-              <button data-view-index="1" tabIndex={viewFocusIndex === 1 ? 0 : -1} onFocus={() => setViewFocusIndex(1)} type="button" onClick={() => zoomAt(viewport.scale * 1.2)} aria-label="Zoom in">+</button>
-              <button data-view-index="2" tabIndex={viewFocusIndex === 2 ? 0 : -1} onFocus={() => setViewFocusIndex(2)} type="button" onClick={fitTreeToView}>Fit tree</button>
-              <button data-view-index="3" tabIndex={viewFocusIndex === 3 ? 0 : -1} onFocus={() => setViewFocusIndex(3)} type="button" onClick={() => setViewport({ x: 0, y: 0, scale: 1 })}>Reset view</button>
+            <div ref={viewControlsRef} className="canvas-controls keyboard-region" data-keyboard-region="view" role="toolbar" aria-label="Canvas view controls">
+              <button data-view-index="0" tabIndex={0} onFocus={() => setViewFocusIndex(0)} type="button" onClick={fitTreeToView} aria-label="Fit tree to view" data-tooltip="Fit tree to view · F">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M20 15v5h-5M4 15v5h5"/></svg>
+              </button>
             </div>
           </div>
         </section>

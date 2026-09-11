@@ -8,7 +8,7 @@ export type ShortcutId =
   | "tool-variables" | "tool-tree" | "tool-present" | "tool-guide" | "tool-more"
   | "undo" | "redo" | "copy" | "cut" | "paste" | "select-all" | "save" | "find"
   | "delete" | "escape" | "activate" | "context-menu" | "region-next" | "region-previous" | "move-items"
-  | "zoom-in" | "zoom-out" | "fit";
+  | "zoom-in" | "zoom-out" | "fit" | "reset-view";
 
 export type ShortcutDefinition = {
   id: ShortcutId;
@@ -51,6 +51,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   { id: "zoom-in", title: "Zoom in", group: "View / Zoom", key: "+", code: "Equal", scopes: ["editor", "presentation"] },
   { id: "zoom-out", title: "Zoom out", group: "View / Zoom", key: "-", code: "Minus", scopes: ["editor", "presentation"] },
   { id: "fit", title: "Fit tree to view", group: "View / Zoom", key: "f", scopes: ["editor", "presentation"] },
+  { id: "reset-view", title: "Reset the canvas view", group: "View / Zoom", key: "r", scopes: ["editor", "presentation"] },
   { id: "save", title: "Save project", group: "Project / File", key: "s", modifiers: "primary", scopes: ["editor"], allowInEditable: true },
 ];
 

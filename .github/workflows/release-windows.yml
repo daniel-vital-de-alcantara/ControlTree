@@ -70,7 +70,11 @@ jobs:
           body: |
             ControlTree's interactive browser and desktop workbench.
 
-            This release adds an offline sample-data gallery to the opening screen. Start immediately with a 2,000-row fictional retail credit-risk dataset or the attributed 4,521-row UCI Bank Marketing sample. Both use the full ControlTree analysis engine, include a suggested target, and are bundled into the website, desktop packages, and Python ZIP without making a network request. It also preserves compatible descendant splits when replacing an earlier split, simplifies missing-value routing in manual splits, and adds a compact layered tree layout.
+            This release gives the workspace a more map-like, canvas-first interface. The tool strip now sits at the lower left and expands into a connected bottom drawer, project status stays compact until hovered, wheel and touch gestures control the canvas, and Fit Tree remains close at hand. Press **R** at any time outside an editor to reset the visual canvas without changing the tree.
+
+            Branches can now be arranged without changing their data. Drag one sibling node onto another for a custom per-split order, or use Tree Settings to keep the original split order, place the highest displayed target metric on the left, or place it on the right. These choices are saved in the project and respected by presentation and image export.
+
+            Mobile safe-area handling has also been improved so the canvas and controls extend cleanly around modern phone screen insets.
 
             - **Setup** installs ControlTree and adds normal Windows shortcuts.
             - **Portable EXE** runs without installation after download.

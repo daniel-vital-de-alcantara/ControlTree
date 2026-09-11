@@ -49,6 +49,7 @@ export function PresentationView({ onExit }: { onExit?: () => void } = {}) {
       if (shortcut.id === "zoom-in") setZoom((value) => Math.min(1.5, value + .1));
       if (shortcut.id === "zoom-out") setZoom((value) => Math.max(.5, value - .1));
       if (shortcut.id === "fit") setZoom(1);
+      if (shortcut.id === "reset-view") setZoom(1);
       if (shortcut.id === "escape") {
         if (onExit) onExit();
         else if (document.fullscreenElement) void document.exitFullscreen();

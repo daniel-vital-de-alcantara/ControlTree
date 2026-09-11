@@ -11,6 +11,8 @@ export type TreeAppearance = {
   fontScale: number;
   nodeSpacing: number;
   layout: "tidy" | "compact";
+  branchOrder: "split" | "target-high-left" | "target-high-right";
+  customBranchOrders: Record<string, string[]>;
 };
 
 export type NodeFieldVisibility = {
@@ -49,6 +51,8 @@ export const defaultAppearance: TreeAppearance = {
   fontScale: 1,
   nodeSpacing: 1,
   layout: "tidy",
+  branchOrder: "split",
+  customBranchOrders: {},
 };
 
 export const defaultNodeFields: NodeFieldVisibility = {
@@ -125,6 +129,13 @@ function metricValue(dataset: ParsedDataset, rowIndices: number[] | undefined, m
   if (metric.aggregation === "min") return { value: Math.min(...numbers) };
   if (metric.aggregation === "max") return { value: Math.max(...numbers) };
   return { value: numbers.reduce((sum, item) => sum + item, 0) / numbers.length };
+}
+
+export function metricSortValue(dataset: ParsedDataset, rowIndices: number[] | undefined, metric: SummaryMetric): number | null {
+  const result = metricValue(dataset, rowIndices, metric);
+  if (!result) return null;
+  if (typeof result.value === "number") return result.value;
+  return result.modeShare ?? null;
 }
 
 function percent(value: number): string {

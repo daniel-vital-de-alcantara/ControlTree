@@ -26,8 +26,13 @@ export function preparedManualSplit(split: ManualSplitResult): PreparedSplit {
 function reapplyTemplate(dataset: ParsedDataset, template: TreeNode, rowIndices: number[], id: string, title: string, branchLabel: string): TreeNode {
   const base: TreeNode = { id, title, branchLabel, samples: rowIndices.length, rowIndices, children: [] };
   if (!template.split) return base;
-  const branches = materializeSplit(dataset, rowIndices, template.split);
-  if (branches.length !== template.children.length || branches.some((branch) => branch.rowIndices.length === 0)) return base;
+  let branches;
+  try {
+    branches = materializeSplit(dataset, rowIndices, template.split);
+  } catch {
+    return base;
+  }
+  if (branches.length !== template.children.length) return base;
   return {
     ...base,
     split: template.split,

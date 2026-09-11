@@ -20,7 +20,7 @@ export type ControlTreeProject = {
   targetSettings?: TargetSettings;
   appearance: TreeAppearance;
   nodeFields: NodeFieldVisibility;
-  summaries: Array<{ variable: string; aggregation: SummaryAggregation; highlighted: boolean; label?: string; format?: MetricFormat; target?: boolean }>;
+  summaries: Array<{ variable: string; aggregation: SummaryAggregation; highlighted: boolean; label?: string; format?: MetricFormat; secondaryAggregation?: SummaryAggregation; secondaryFormat?: MetricFormat; secondarySeparator?: "parentheses" | "dash"; target?: boolean }>;
   distribution?: DistributionSettings;
   variableTypes?: VariableTypeOverrides;
   sourceFileName?: string;
@@ -90,12 +90,15 @@ export function createProject(
     targetSettings: { ...targetSettings },
     appearance: { ...appearance },
     nodeFields: { ...nodeFields },
-    summaries: summaries.map(({ variable, aggregation, highlighted, label, format, target }) => ({
+    summaries: summaries.map(({ variable, aggregation, highlighted, label, format, secondaryAggregation, secondaryFormat, secondarySeparator, target }) => ({
       variable,
       aggregation,
       highlighted,
       ...(label?.trim() ? { label: label.trim() } : {}),
       ...(format && format !== "number" ? { format } : {}),
+      ...(secondaryAggregation ? { secondaryAggregation } : {}),
+      ...(secondaryAggregation && secondaryFormat && secondaryFormat !== "number" ? { secondaryFormat } : {}),
+      ...(secondaryAggregation && secondarySeparator === "dash" ? { secondarySeparator } : {}),
       ...(target ? { target: true } : {}),
     })),
     ...(distribution ? { distribution: { ...distribution } } : {}),
@@ -126,10 +129,13 @@ function parseSplit(value: unknown): TreeSplitDefinition {
     throw new Error("A saved split is missing its variable.");
   }
   if (split.kind === "percentile") {
-    if (typeof split.buckets !== "number" || !Number.isInteger(split.buckets) || split.buckets < 2 || split.buckets > 10) {
+    const cutpoints = Array.isArray(split.cutpoints) && split.cutpoints.every((item) => typeof item === "number" && Number.isFinite(item) && item > 0 && item < 1)
+      ? [...new Set(split.cutpoints as number[])].sort((left, right) => left - right)
+      : undefined;
+    if (typeof split.buckets !== "number" || !Number.isInteger(split.buckets) || split.buckets < 2 || split.buckets > 20 || (split.cutpoints !== undefined && (!cutpoints?.length || cutpoints.length > 19))) {
       throw new Error("A saved percentile split is invalid.");
     }
-    return { kind: "percentile", feature: split.feature, buckets: split.buckets };
+    return { kind: "percentile", feature: split.feature, buckets: cutpoints ? cutpoints.length + 1 : split.buckets, ...(cutpoints ? { cutpoints } : {}) };
   }
   if (split.kind === "binary") {
     if ((split.operator !== "<=" && split.operator !== "==") || !isPrimitive(split.value)) {
@@ -147,6 +153,9 @@ function parseSplit(value: unknown): TreeSplitDefinition {
       values: split.values,
       forceCategorical: split.forceCategorical === true,
       includeOther: split.includeOther !== false,
+      ...(split.missingDestination === "other" || split.missingDestination === "exclude" || typeof split.missingDestination === "number" && Number.isInteger(split.missingDestination) && split.missingDestination >= 0
+        ? { missingDestination: split.missingDestination as number | "other" | "exclude" }
+        : {}),
     };
   }
   throw new Error("This file contains an unsupported split type.");
@@ -234,6 +243,11 @@ export function parseProjectText(text: string): ControlTreeProject {
       ...(metric.format === "percentage" || metric.format === "compact" || metric.format === "percent_root" || metric.format === "percent_parent"
         ? { format: metric.format as MetricFormat }
         : {}),
+      ...(aggregations.has(metric.secondaryAggregation as SummaryAggregation) ? { secondaryAggregation: metric.secondaryAggregation as SummaryAggregation } : {}),
+      ...(metric.secondaryFormat === "percentage" || metric.secondaryFormat === "compact" || metric.secondaryFormat === "percent_root" || metric.secondaryFormat === "percent_parent"
+        ? { secondaryFormat: metric.secondaryFormat as MetricFormat }
+        : {}),
+      ...(metric.secondarySeparator === "dash" ? { secondarySeparator: "dash" as const } : {}),
       ...(metric.target === true ? { target: true } : {}),
     };
   });
@@ -247,6 +261,9 @@ export function parseProjectText(text: string): ControlTreeProject {
     rowCountFormat: savedFields.rowCountFormat === "percent_root" || savedFields.rowCountFormat === "percent_parent"
       ? savedFields.rowCountFormat
       : "count",
+    ...(savedFields.rowCountSecondaryFormat === "percent_root" || savedFields.rowCountSecondaryFormat === "percent_parent"
+      ? { rowCountSecondaryFormat: savedFields.rowCountSecondaryFormat }
+      : {}),
   };
   let distribution: DistributionSettings | undefined;
   if (project.distribution !== undefined) {

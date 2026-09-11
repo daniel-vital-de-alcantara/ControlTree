@@ -43,4 +43,11 @@ describe("split clipboard", () => {
     expect(pasted.split).toEqual(randomSource.split);
     expect(pasted.children.map((child) => child.samples)).toEqual([2, 2]);
   });
+
+  it("preserves copied structure when a destination branch is empty", () => {
+    const dataset = normalizeTable([["age"], [40], [50]], "older.csv");
+    const destination: TreeNode = { id: "root", title: "Destination", samples: 2, rowIndices: [0, 1], children: [] };
+    const pasted = pasteCopiedSplits(dataset, destination, "root", parseCopiedSplits(serializeCopiedSplits(source, "subtree")));
+    expect(pasted.children.map((child) => child.samples)).toEqual([0, 2]);
+  });
 });

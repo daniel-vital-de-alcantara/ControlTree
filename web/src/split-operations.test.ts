@@ -47,6 +47,20 @@ describe("existing split operations", () => {
     expect(next.children.every((child) => child.children.length === 2)).toBe(true);
   });
 
+  it("keeps an inserted split usable when a reapplied branch is empty", () => {
+    const oneSided = {
+      definition: { kind: "binary" as const, feature: "income", operator: "<=" as const, value: 5 },
+      branches: [
+        { label: "income <= 5", count: 0, rowIndices: [] },
+        { label: "not (income <= 5)", count: 4, rowIndices: [0, 1, 2, 3] },
+      ],
+    };
+    const next = applyPreparedSplit(tree, "root", oneSided, "insert", dataset);
+    expect(next.children.map((child) => child.samples)).toEqual([0, 4]);
+    expect(next.children[0].children).toHaveLength(2);
+    expect(next.children[0].children.every((child) => child.samples === 0)).toBe(true);
+  });
+
   it("removes a node split and all descendants", () => {
     const next = removeNodeSplit(tree, "root");
     expect(next.split).toBeUndefined();

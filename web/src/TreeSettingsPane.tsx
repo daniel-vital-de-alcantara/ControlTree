@@ -237,12 +237,28 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
               aria-label="Row count display"
               disabled={!nodeFields.rowCount}
               value={nodeFields.rowCountFormat}
-              onChange={(event) => onNodeFieldsChange({ ...nodeFields, rowCountFormat: event.target.value as NodeFieldVisibility["rowCountFormat"] })}
+              onChange={(event) => {
+                const rowCountFormat = event.target.value as NodeFieldVisibility["rowCountFormat"];
+                onNodeFieldsChange({ ...nodeFields, rowCountFormat, ...(rowCountFormat !== "count" ? { rowCountSecondaryFormat: undefined } : {}) });
+              }}
             >
               <option value="count">Number of rows</option>
               <option value="percent_root">% of root rows</option>
               <option value="percent_parent">% of parent rows</option>
             </select>
+            {nodeFields.rowCountFormat === "count" && <select
+              aria-label="Additional row count display"
+              disabled={!nodeFields.rowCount}
+              value={nodeFields.rowCountSecondaryFormat ?? "none"}
+              onChange={(event) => onNodeFieldsChange({
+                ...nodeFields,
+                rowCountSecondaryFormat: event.target.value === "none" ? undefined : event.target.value as "percent_root" | "percent_parent",
+              })}
+            >
+              <option value="none">No second value</option>
+              <option value="percent_root">Also % of root</option>
+              <option value="percent_parent">Also % of parent</option>
+            </select>}
           </div>
         </div>
         <div className="calculated-metrics-heading">
@@ -312,6 +328,33 @@ export function TreeSettingsPane({ section, dataset, appearance, nodeFields, met
                   {canUseRelativeFormats && <option value="percent_parent">% of parent node</option>}
                 </select>
               </label>
+              {metric.secondaryAggregation ? (
+                <div className="metric-secondary-editor">
+                  <div className="metric-secondary-editor__heading">
+                    <strong>Second value</strong>
+                    <button type="button" onClick={() => updateMetric(metric.id, { secondaryAggregation: undefined, secondaryFormat: undefined, secondarySeparator: undefined })}>Remove</button>
+                  </div>
+                  <div className="metric-editor__inputs">
+                    <select aria-label={`Second calculation for ${metric.variable}`} value={metric.secondaryAggregation} onChange={(event) => updateMetric(metric.id, { secondaryAggregation: event.target.value as SummaryMetric["aggregation"] })}>
+                      {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                    <select aria-label={`Second value format for ${metric.variable}`} value={metric.secondaryFormat ?? "number"} onChange={(event) => updateMetric(metric.id, { secondaryFormat: event.target.value as SummaryMetric["format"] })}>
+                      <option value="number">Standard number</option>
+                      <option value="compact">Compact</option>
+                      <option value="percentage">Percentage</option>
+                      <option value="percent_root">% of root</option>
+                      <option value="percent_parent">% of parent</option>
+                    </select>
+                  </div>
+                  <label className="metric-format-row">
+                    <span>Join values with</span>
+                    <select value={metric.secondarySeparator ?? "parentheses"} onChange={(event) => updateMetric(metric.id, { secondarySeparator: event.target.value as "parentheses" | "dash" })}>
+                      <option value="parentheses">Parentheses</option>
+                      <option value="dash">Dash</option>
+                    </select>
+                  </label>
+                </div>
+              ) : <button className="text-button metric-add-secondary" type="button" onClick={() => updateMetric(metric.id, { secondaryAggregation: metric.aggregation, secondaryFormat: "percent_root", secondarySeparator: "parentheses" })}>Add second value</button>}
               <div className="metric-editor__actions">
                 <label>
                   <input type="checkbox" checked={metric.highlighted} disabled={metric.target} onChange={(event) => updateMetric(metric.id, { highlighted: event.target.checked })} />

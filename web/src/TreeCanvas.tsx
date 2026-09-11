@@ -18,13 +18,18 @@ type Props = {
 };
 
 export function rowCountLabel(node: TreeNode, nodeFields: NodeFieldVisibility, rootSamples: number, parentSamples: number): string {
+  const share = (format: "percent_root" | "percent_parent") => {
+    const denominator = format === "percent_root" ? rootSamples : parentSamples;
+    return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(denominator ? node.samples / denominator * 100 : 0)}%`;
+  };
   if (nodeFields.rowCountFormat === "percent_root") {
     return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(rootSamples ? node.samples / rootSamples * 100 : 0)}% of root rows`;
   }
   if (nodeFields.rowCountFormat === "percent_parent") {
     return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(parentSamples ? node.samples / parentSamples * 100 : 0)}% of parent rows`;
   }
-  return `${node.samples.toLocaleString()} rows`;
+  const secondary = nodeFields.rowCountSecondaryFormat ? ` (${share(nodeFields.rowCountSecondaryFormat)})` : "";
+  return `${node.samples.toLocaleString()}${secondary} rows`;
 }
 
 function NodeCard({ node, selected, keyboardFocused, onSelect, onFocus, onContextMenu, summaries, nodeFields, rootSamples, parentSamples, depth }: {
@@ -42,7 +47,7 @@ function NodeCard({ node, selected, keyboardFocused, onSelect, onFocus, onContex
 }) {
   return (
     <button
-      className={`node-card${selected ? " node-card--selected" : ""}${keyboardFocused ? " node-card--keyboard-focused" : ""}`}
+      className={`node-card${node.samples === 0 ? " node-card--empty" : ""}${selected ? " node-card--selected" : ""}${keyboardFocused ? " node-card--keyboard-focused" : ""}`}
       data-node-id={node.id}
       onClick={onSelect}
       onFocus={onFocus}
@@ -56,7 +61,8 @@ function NodeCard({ node, selected, keyboardFocused, onSelect, onFocus, onContex
     >
       {nodeFields.nodeName && <span className="node-card__eyebrow">{node.id === "root" ? "Root node" : `Node ${node.id}`}</span>}
       {nodeFields.nodeTitle && <strong>{node.title}</strong>}
-      {nodeFields.rowCount && <span>{rowCountLabel(node, nodeFields, rootSamples, parentSamples)}</span>}
+      {nodeFields.rowCount && <span className="node-card__row-count">{rowCountLabel(node, nodeFields, rootSamples, parentSamples)}</span>}
+      {node.samples === 0 && <span className="node-card__empty-label">Empty branch</span>}
       {summaries?.[node.id]?.map((summary) => (
         <span className={`node-card__summary${summary.highlighted ? " node-card__summary--highlighted" : ""}`} key={summary.id ?? summary.label} title={summary.label}>
           <small>{summary.label}</small>

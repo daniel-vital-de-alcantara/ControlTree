@@ -23,4 +23,21 @@ describe("special splits", () => {
     expect(branches.map((branch) => branch.rowIndices.length)).toEqual([25, 25, 25, 25]);
     expect(branches.map((branch) => branch.label)).toEqual(["P0–P25", "P25–P50", "P50–P75", "P75–P100"]);
   });
+
+  it("creates asymmetric groups from custom percentile cut points", () => {
+    const branches = materializeSplit(dataset, dataset.rows.map((_, index) => index), {
+      kind: "percentile",
+      feature: "value",
+      buckets: 5,
+      cutpoints: [.9, .95, .99, .999],
+    });
+    expect(branches.map((branch) => branch.rowIndices.length)).toEqual([90, 5, 4, 1, 0]);
+    expect(branches.map((branch) => branch.label)).toEqual(["P0–P90", "P90–P95", "P95–P99", "P99–P99.9", "P99.9–P100"]);
+  });
+
+  it("allows up to twenty equal percentile groups", () => {
+    const branches = materializeSplit(dataset, dataset.rows.map((_, index) => index), { kind: "percentile", feature: "value", buckets: 20 });
+    expect(branches).toHaveLength(20);
+    expect(branches.every((branch) => branch.rowIndices.length === 5)).toBe(true);
+  });
 });

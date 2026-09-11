@@ -1381,6 +1381,8 @@ export default function App() {
             />
           ) : !selectedNode ? (
             <div className="empty-state">Select a node to continue.</div>
+          ) : selectedNode.samples === 0 ? (
+            <div className="empty-state">This branch is empty. It remains in the tree for structure and replay, but splits and distributions are not applicable until it receives rows from another dataset.</div>
           ) : (
             <>
               {nodeTab === "distribution" ? (

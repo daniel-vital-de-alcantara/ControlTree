@@ -86,12 +86,13 @@ export function evaluateTree(dataset: ParsedDataset, tree: TreeNode, variable: s
   const numeric = isNumericColumn(dataset, variable);
   const rootIndices = indicesFor(dataset, tree);
   const parent = impurity(dataset, variable, rootIndices, numeric);
-  const terminalNodes = leaves(tree);
+  const terminalNodes = leaves(tree).filter((node) => indicesFor(dataset, node).length > 0);
   const internalNodes = splitNodes(tree);
   const terminalImpurities = terminalNodes.map((node) => impurity(dataset, variable, indicesFor(dataset, node), numeric));
 
   const splits = internalNodes.map((node): SplitQuality => {
-    const childSizes = node.children.map((child) => indicesFor(dataset, child).length);
+    const nonEmptyChildren = node.children.filter((child) => indicesFor(dataset, child).length > 0);
+    const childSizes = nonEmptyChildren.map((child) => indicesFor(dataset, child).length);
     const total = childSizes.reduce((sum, size) => sum + size, 0);
     const smallest = total ? Math.min(...childSizes) / total * 100 : 0;
     const warning = childSizes.some((size) => size < 20)
@@ -104,9 +105,9 @@ export function evaluateTree(dataset: ParsedDataset, tree: TreeNode, variable: s
       nodeTitle: node.title,
       score: reduction(
         impurity(dataset, variable, indicesFor(dataset, node), numeric),
-        node.children.map((child) => impurity(dataset, variable, indicesFor(dataset, child), numeric)),
+        nonEmptyChildren.map((child) => impurity(dataset, variable, indicesFor(dataset, child), numeric)),
       ),
-      childCount: node.children.length,
+      childCount: nonEmptyChildren.length,
       smallestBranchPercent: smallest,
       ...(warning ? { warning } : {}),
     };

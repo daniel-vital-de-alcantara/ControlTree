@@ -18,10 +18,7 @@ type Props = {
 
 function prepared(dataset: ParsedDataset, node: TreeNode, definition: TreeSplitDefinition): PreparedSplit {
   const branches = materializeSplit(dataset, node.rowIndices ?? [], definition);
-  if (branches.length < 2) throw new Error("This split needs at least two non-empty groups.");
-  if (definition.kind === "random" && branches.length !== definition.percentages.length) {
-    throw new Error("This node has too few rows to give every random group at least one row.");
-  }
+  if (branches.length < 2) throw new Error("This split needs at least two configured groups.");
   return { definition, branches: branches.map((branch) => ({ ...branch, count: branch.rowIndices.length })) };
 }
 
@@ -31,6 +28,10 @@ export function SpecialSplitPane({ dataset, node, mode, feature = "", onBack, on
   const [percentages, setPercentages] = useState((existingRandom?.percentages ?? [80, 20]).join(", "));
   const [seed, setSeed] = useState(existingRandom?.seed ?? Math.floor(Math.random() * 2_000_000_000));
   const [buckets, setBuckets] = useState(existingPercentile?.buckets ?? 4);
+  const [percentileMode, setPercentileMode] = useState<"equal" | "custom">(existingPercentile?.cutpoints?.length ? "custom" : "equal");
+  const [percentileCutpoints, setPercentileCutpoints] = useState(existingPercentile?.cutpoints?.length
+    ? existingPercentile.cutpoints.join(", ")
+    : "0.9, 0.95, 0.99, 0.999");
   const [error, setError] = useState("");
   const numeric = mode === "percentile" && isNumericVariable(dataset, feature, node.rowIndices);
 
@@ -46,6 +47,20 @@ export function SpecialSplitPane({ dataset, node, mode, feature = "", onBack, on
     if (!numeric) {
       setError("Percentile splits require a numeric variable. You can correct its type in Variable types.");
       return null;
+    }
+    if (percentileMode === "custom") {
+      const tokens = percentileCutpoints.split(/[,;\s]+/).filter(Boolean);
+      const parsed = tokens.map((token) => Number(token.replace(/%$/, "")));
+      if (!tokens.length || parsed.some((value) => !Number.isFinite(value) || value <= 0 || value >= 100)) {
+        setError("Enter percentile cut points between 0 and 1, or percentages between 1 and 100.");
+        return null;
+      }
+      const cutpoints = [...new Set(parsed.map((value) => value >= 1 ? value / 100 : value))].sort((left, right) => left - right);
+      if (cutpoints.some((value) => value <= 0 || value >= 1) || cutpoints.length > 19) {
+        setError("Choose between 1 and 19 unique cut points.");
+        return null;
+      }
+      return { kind: "percentile", feature, buckets: cutpoints.length + 1, cutpoints };
     }
     return { kind: "percentile", feature, buckets };
   }
@@ -88,11 +103,24 @@ export function SpecialSplitPane({ dataset, node, mode, feature = "", onBack, on
           </div>
         </>
       ) : (
-        <div className="manual-control">
-          <label className="field-label" htmlFor="percentile-buckets">Number of groups</label>
-          <select id="percentile-buckets" value={buckets} onChange={(event) => setBuckets(Number(event.target.value))}>
-            {[2, 3, 4, 5, 10].map((value) => <option value={value} key={value}>{value} groups · approximately {(100 / value).toFixed(value === 3 ? 1 : 0)}% each</option>)}
-          </select>
+        <div className="manual-control percentile-controls">
+          <div className="percentile-mode-picker" role="group" aria-label="Percentile split style">
+            <button className={percentileMode === "equal" ? "percentile-mode--active" : ""} type="button" onClick={() => setPercentileMode("equal")}><strong>Equal groups</strong><small>Divide rows evenly by rank.</small></button>
+            <button className={percentileMode === "custom" ? "percentile-mode--active" : ""} type="button" onClick={() => setPercentileMode("custom")}><strong>Custom cuts</strong><small>Focus on specific tails or ranges.</small></button>
+          </div>
+          {percentileMode === "equal" ? (
+            <label className="appearance-slider percentile-group-slider" htmlFor="percentile-buckets">
+              <span><strong>Number of groups</strong><small>Every group contains approximately {(100 / buckets).toFixed(buckets === 3 || buckets > 6 ? 1 : 0)}% of ranked values.</small></span>
+              <output>{buckets}</output>
+              <input id="percentile-buckets" type="range" min="2" max="20" step="1" value={buckets} onChange={(event) => setBuckets(Number(event.target.value))} />
+            </label>
+          ) : (
+            <div className="manual-control percentile-custom-control">
+              <label className="field-label" htmlFor="percentile-cutpoints">Percentile cut points</label>
+              <input id="percentile-cutpoints" className="text-input" value={percentileCutpoints} onChange={(event) => setPercentileCutpoints(event.target.value)} placeholder="0.9, 0.95, 0.99, 0.999" />
+              <p>Use proportions such as 0.9 and 0.99, or percentages such as 90%, 99 and 99.9. ControlTree sorts them automatically.</p>
+            </div>
+          )}
           {!numeric && <p className="form-error">{feature} is not currently numeric.</p>}
         </div>
       )}

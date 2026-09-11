@@ -9,6 +9,7 @@ export async function requestManualSplit(
   values: Array<string | number | boolean>,
   forceCategorical: boolean,
   includeOther: boolean,
+  missingDestination?: number | "other" | "exclude",
 ): Promise<ManualSplitResult> {
   const branches = materializeManualBranches(
     dataset,
@@ -17,6 +18,7 @@ export async function requestManualSplit(
     values,
     forceCategorical,
     includeOther,
+    missingDestination,
   );
   return {
     feature,
@@ -26,6 +28,7 @@ export async function requestManualSplit(
       values,
       forceCategorical,
       includeOther,
+      ...(missingDestination !== undefined ? { missingDestination } : {}),
     },
     branches: branches.map((branch) => ({
       label: branch.label,

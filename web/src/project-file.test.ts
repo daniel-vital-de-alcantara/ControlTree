@@ -43,10 +43,12 @@ describe("ControlTree project files", () => {
     const percentileTree: TreeNode = { ...tree, split: { kind: "percentile", feature: "age", buckets: 2 } };
     expect(parseProjectText(JSON.stringify(createProject(randomTree, null, defaultAppearance, defaultNodeFields, []))).tree.split).toEqual(randomTree.split);
     expect(parseProjectText(JSON.stringify(createProject(percentileTree, null, defaultAppearance, defaultNodeFields, []))).tree.split).toEqual(percentileTree.split);
+    const customPercentileTree: TreeNode = { ...tree, split: { kind: "percentile", feature: "age", buckets: 4, cutpoints: [.9, .99, .999] } };
+    expect(parseProjectText(JSON.stringify(createProject(customPercentileTree, null, defaultAppearance, defaultNodeFields, []))).tree.split).toEqual(customPercentileTree.split);
   });
 
   it("preserves custom metric labels and display formats", () => {
-    const fields = { ...defaultNodeFields, rowCountFormat: "percent_parent" as const };
+    const fields = { ...defaultNodeFields, rowCountFormat: "count" as const, rowCountSecondaryFormat: "percent_parent" as const };
     const project = createProject(tree, "outcome", defaultAppearance, fields, [
       {
         id: "metric-1",
@@ -55,6 +57,8 @@ describe("ControlTree project files", () => {
         highlighted: true,
         label: "Exposure share",
         format: "percent_root",
+        secondaryAggregation: "sum",
+        secondaryFormat: "percent_parent",
       },
       {
         id: "metric-2",
@@ -66,9 +70,9 @@ describe("ControlTree project files", () => {
     ]);
     const restored = parseProjectText(JSON.stringify(project));
 
-    expect(restored.nodeFields.rowCountFormat).toBe("percent_parent");
+    expect(restored.nodeFields.rowCountSecondaryFormat).toBe("percent_parent");
     expect(restored.summaries).toEqual([
-      { variable: "sales", aggregation: "sum", highlighted: true, label: "Exposure share", format: "percent_root" },
+      { variable: "sales", aggregation: "sum", highlighted: true, label: "Exposure share", format: "percent_root", secondaryAggregation: "sum", secondaryFormat: "percent_parent" },
       { variable: "sales", aggregation: "sum", highlighted: false, format: "compact" },
     ]);
   });

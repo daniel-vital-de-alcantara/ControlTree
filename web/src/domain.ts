@@ -24,6 +24,7 @@ export type TreeSplitDefinition =
       values: Array<number | string | boolean>;
       forceCategorical: boolean;
       includeOther: boolean;
+      missingDestination?: number | "other" | "exclude";
     }
   | {
       kind: "random";
@@ -34,6 +35,7 @@ export type TreeSplitDefinition =
       kind: "percentile";
       feature: string;
       buckets: number;
+      cutpoints?: number[];
     };
 
 export type TreeNode = {
@@ -77,7 +79,9 @@ export function describeRule(split: SplitCandidate): string {
 
 export function describeTreeSplit(split: TreeSplitDefinition): string {
   if (split.kind === "random") return `Random sample: ${split.percentages.map((value) => `${value}%`).join(" / ")}`;
-  if (split.kind === "percentile") return `${split.feature}: ${split.buckets} percentile groups`;
+  if (split.kind === "percentile") return split.cutpoints?.length
+    ? `${split.feature}: percentiles ${split.cutpoints.map((value) => `${Number((value * 100).toPrecision(6))}%`).join(", ")}`
+    : `${split.feature}: ${split.buckets} percentile groups`;
   if (split.kind === "binary") {
     const value = typeof split.value === "string" ? `“${split.value}”` : String(split.value);
     return `${split.feature} ${split.operator} ${value}`;

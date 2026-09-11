@@ -134,6 +134,26 @@ describe("tree summaries", () => {
     }, [0, 1, 2])).toBe("33.3%");
   });
 
+  it("combines two calculations with parentheses or a dash", () => {
+    expect(summarizeMetric(dataset, [0], {
+      id: "combined",
+      variable: "amount",
+      aggregation: "sum",
+      highlighted: true,
+      format: "compact",
+      secondaryAggregation: "sum",
+      secondaryFormat: "percent_root",
+    }, undefined, [0, 1, 2])).toBe("10 (33.3%)");
+    expect(summarizeMetric(dataset, [0, 1], {
+      id: "range",
+      variable: "amount",
+      aggregation: "min",
+      highlighted: false,
+      secondaryAggregation: "max",
+      secondarySeparator: "dash",
+    })).toBe("10 – 20");
+  });
+
   it("calculates relative metrics against each node's parent", () => {
     const tree: TreeNode = {
       id: "root",
@@ -162,5 +182,6 @@ describe("tree summaries", () => {
     const node: TreeNode = { id: "root.1", title: "Branch", samples: 25, children: [] };
     expect(rowCountLabel(node, { ...defaultNodeFields, rowCountFormat: "percent_root" }, 100, 50)).toBe("25% of root rows");
     expect(rowCountLabel(node, { ...defaultNodeFields, rowCountFormat: "percent_parent" }, 100, 50)).toBe("50% of parent rows");
+    expect(rowCountLabel(node, { ...defaultNodeFields, rowCountSecondaryFormat: "percent_root" }, 100, 50)).toBe("25 (25%) rows");
   });
 });

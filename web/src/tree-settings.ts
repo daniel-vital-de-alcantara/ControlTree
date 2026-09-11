@@ -17,6 +17,7 @@ export type NodeFieldVisibility = {
   nodeTitle: boolean;
   rowCount: boolean;
   rowCountFormat: "count" | "percent_root" | "percent_parent";
+  rowCountSecondaryFormat?: "percent_root" | "percent_parent";
 };
 
 export type SummaryAggregation = "average" | "sum" | "min" | "max" | "count" | "distinct" | "missing" | "mode";
@@ -29,6 +30,9 @@ export type SummaryMetric = {
   highlighted: boolean;
   label?: string;
   format?: MetricFormat;
+  secondaryAggregation?: SummaryAggregation;
+  secondaryFormat?: MetricFormat;
+  secondarySeparator?: "parentheses" | "dash";
   target?: boolean;
 };
 
@@ -98,7 +102,7 @@ export function metricLabel(metric: SummaryMetric): string {
 
 type MetricValue = { value: number | string; modeShare?: number } | null;
 
-function metricValue(dataset: ParsedDataset, rowIndices: number[] | undefined, metric: SummaryMetric): MetricValue {
+function metricValue(dataset: ParsedDataset, rowIndices: number[] | undefined, metric: Pick<SummaryMetric, "variable" | "aggregation">): MetricValue {
   const values = observedValues(dataset, metric.variable, rowIndices);
   const present = values.filter((value) => value !== null && String(value).trim() !== "");
   if (metric.aggregation === "missing") return { value: values.length - present.length };
@@ -130,24 +134,32 @@ export function summarizeMetric(
   rowIndices: number[] | undefined,
   metric: SummaryMetric,
   comparisonRowIndices?: number[],
+  secondaryComparisonRowIndices?: number[],
 ): string {
-  const current = metricValue(dataset, rowIndices, metric);
+  function summarizeOperation(aggregation: SummaryAggregation, format: MetricFormat | undefined, comparison?: number[]): string {
+  const operation = { variable: metric.variable, aggregation };
+  const current = metricValue(dataset, rowIndices, operation);
   if (!current) return "—";
-  if (metric.format === "percentage") {
+  if (format === "percentage") {
     if (current.modeShare !== undefined) return percent(current.modeShare * 100);
     if (typeof current.value === "number") return percent(current.value * 100);
   }
-  if (metric.format === "compact" && typeof current.value === "number") {
+  if (format === "compact" && typeof current.value === "number") {
     return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(current.value);
   }
-  if ((metric.format === "percent_root" || metric.format === "percent_parent") && comparisonRowIndices) {
-    const comparison = metricValue(dataset, comparisonRowIndices, metric);
-    if (typeof current.value !== "number" || typeof comparison?.value !== "number" || comparison.value === 0) return "—";
-    return percent(current.value / comparison.value * 100);
+  if ((format === "percent_root" || format === "percent_parent") && comparison) {
+    const comparisonValue = metricValue(dataset, comparison, operation);
+    if (typeof current.value !== "number" || typeof comparisonValue?.value !== "number" || comparisonValue.value === 0) return "—";
+    return percent(current.value / comparisonValue.value * 100);
   }
   return typeof current.value === "number"
     ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(current.value)
     : current.value;
+  }
+  const primary = summarizeOperation(metric.aggregation, metric.format, comparisonRowIndices);
+  if (!metric.secondaryAggregation) return primary;
+  const secondary = summarizeOperation(metric.secondaryAggregation, metric.secondaryFormat, secondaryComparisonRowIndices);
+  return metric.secondarySeparator === "dash" ? `${primary} – ${secondary}` : `${primary} (${secondary})`;
 }
 
 export function buildNodeSummaries(
@@ -168,6 +180,7 @@ export function buildNodeSummaries(
         node.rowIndices,
         metric,
         metric.format === "percent_root" ? rootIndices : metric.format === "percent_parent" ? parent?.rowIndices ?? rootIndices : undefined,
+        metric.secondaryFormat === "percent_root" ? rootIndices : metric.secondaryFormat === "percent_parent" ? parent?.rowIndices ?? rootIndices : undefined,
       ),
       highlighted: metric.highlighted,
     }));

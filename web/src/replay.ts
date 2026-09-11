@@ -22,7 +22,7 @@ function materializeNode(
   };
   if (!saved.split) return node;
   const branches = materializeSplit(dataset, rowIndices, saved.split);
-  if (branches.length !== saved.children.length || branches.some((branch) => branch.rowIndices.length === 0)) {
+  if (branches.length !== saved.children.length) {
     throw new Error(
       `The saved split '${saved.split.kind === "random" ? "random sample" : saved.split.feature}' does not produce the same branches with this dataset. ` +
       "Check that this is a compatible data version.",

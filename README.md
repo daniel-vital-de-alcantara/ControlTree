@@ -86,13 +86,16 @@ device. The Titanic demo remains available without an upload.
 
 The Split tool supports recommended binary splits, manual numeric or
 categorical multiway splits, reproducible random sample groups, and percentile
-groups. Its searchable variable list includes the target at the end for manual
+groups. Percentiles can be divided into any equal group count from 2 through 20,
+or defined with exact custom cuts such as 90%, 95%, 99%, and 99.9%. Its searchable variable list includes the target at the end for manual
 or percentile splitting even though the target is intentionally not scored
 against itself. The Tree configurator controls node, accent,
 connector, and canvas colors and can show or hide the dotted grid. Its Metrics
 section controls the standard node fields and supports unlimited calculated
-metrics. Every metric can independently receive highlighted treatment in the
-node cards.
+metrics. A metric can combine two calculations—for example a compact sum with
+its percentage of the root—and row counts can similarly include a root or
+parent share. Every metric can independently receive highlighted treatment in
+the node cards.
 The Split tool starts by ranking variables, then shows up to three recommended
 rules for the chosen variable alongside the manual option. Recommendation work
 runs in a browser worker so the canvas remains interactive and reports elapsed
@@ -103,6 +106,9 @@ Right-clicking a node opens ControlTree-specific actions for renaming, focusing
 or collapsing branches, copying one split or an entire split subtree, pasting
 rules into another node or app window, and trimming descendants. The ten most
 recent node names are saved with the project and offered as rename suggestions.
+Copied subtrees preserve valid steps even when a deeper rule is incompatible
+with the destination. Empty branches remain visible for structural consistency,
+while distribution and quality calculations naturally skip them.
 The presentation button opens a second, synchronized tree-only window for live
 client sessions. It receives the tree and calculated display values, not raw
 dataset rows. The same tool can download a clean PNG of the complete tree or an

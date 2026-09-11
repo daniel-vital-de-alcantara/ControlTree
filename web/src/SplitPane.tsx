@@ -146,7 +146,7 @@ export function SplitPane({ dataset, node, target, candidates, status, error, el
       </button>
       <button className="more-action split-percentile-choice" type="button" onClick={onPercentile}>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19h16M6 16V8M12 16V4M18 16v-5M3 8h6M9 4h6M15 11h6"/></svg>
-        <span><strong>Split by percentiles</strong><small>Create equal-sized groups from the ranked values of {feature}.</small></span>
+        <span><strong>Split by percentiles</strong><small>Create equal-sized groups or exact percentile cuts from the ranked values of {feature}.</small></span>
       </button>
     </div>
   );

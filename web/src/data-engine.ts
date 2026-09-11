@@ -94,7 +94,7 @@ function formatCutpoint(value: number): string {
 }
 
 function formatPercent(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+  return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(6)));
 }
 
 export function materializeManualBranches(
@@ -104,6 +104,7 @@ export function materializeManualBranches(
   values: Array<string | number | boolean>,
   forceCategorical: boolean,
   includeOther: boolean,
+  missingDestination: number | "other" | "exclude" = includeOther ? "other" : "exclude",
 ): MaterializedBranch[] {
   const position = columnPosition(dataset, feature);
   const numeric = isNumericColumn(dataset, feature, rowIndices) && !forceCategorical;
@@ -121,7 +122,7 @@ export function materializeManualBranches(
       const label = previous === null
         ? `<=${formatCutpoint(cutpoint)}`
         : `(${formatCutpoint(previous)}, ${formatCutpoint(cutpoint)}]`;
-      if (indices.length > 0) branches.push({ label, rowIndices: indices });
+      branches.push({ label, rowIndices: indices });
       previous = cutpoint;
     }
     const last = cutpoints[cutpoints.length - 1];
@@ -129,28 +130,38 @@ export function materializeManualBranches(
       const current = asNumber(dataset.rows[rowIndex]?.[position], dataset, feature);
       return current !== null && current > last;
     });
-    if (upper.length > 0) branches.push({ label: `>${formatCutpoint(last)}`, rowIndices: upper });
-    if (includeOther) {
-      const missing = rowIndices.filter((rowIndex) => isMissing(dataset.rows[rowIndex]?.[position]));
-      if (missing.length > 0) branches.push({ label: "Other / missing", rowIndices: missing });
+    branches.push({ label: `>${formatCutpoint(last)}`, rowIndices: upper });
+    const missing = rowIndices.filter((rowIndex) => isMissing(dataset.rows[rowIndex]?.[position]));
+    if (typeof missingDestination === "number" && branches[missingDestination]) {
+      branches[missingDestination].rowIndices.push(...missing);
+      branches[missingDestination].label += " + missing";
+    } else if (missingDestination === "other") {
+      branches.push({ label: "Missing", rowIndices: missing });
     }
   } else {
     if (values.length === 0) throw new Error("Choose at least one category.");
     for (const value of values) {
       const indices = rowIndices.filter((rowIndex) => valuesEqual(dataset.rows[rowIndex]?.[position], value));
-      if (indices.length > 0) branches.push({ label: String(value), rowIndices: indices });
+      branches.push({ label: String(value), rowIndices: indices });
+    }
+    const missing = rowIndices.filter((rowIndex) => isMissing(dataset.rows[rowIndex]?.[position]));
+    if (typeof missingDestination === "number" && branches[missingDestination]) {
+      branches[missingDestination].rowIndices.push(...missing);
+      branches[missingDestination].label += " + missing";
     }
     if (includeOther) {
       const other = rowIndices.filter((rowIndex) => {
         const cell = dataset.rows[rowIndex]?.[position];
-        return isMissing(cell) || !values.some((value) => valuesEqual(cell, value));
+        return (missingDestination === "other" && isMissing(cell)) || (!isMissing(cell) && !values.some((value) => valuesEqual(cell, value)));
       });
-      if (other.length > 0) branches.push({ label: "Other / missing", rowIndices: other });
+      branches.push({ label: missingDestination === "other" ? "Other / missing" : "Other", rowIndices: other });
+    } else if (missingDestination === "other") {
+      branches.push({ label: "Missing", rowIndices: missing });
     }
   }
 
   if (branches.length < 2) {
-    throw new Error("Manual split produced fewer than 2 non-empty branches. Choose different values.");
+    throw new Error("Manual split needs at least two configured branches. Choose another value or include an Other branch.");
   }
   return branches;
 }
@@ -181,7 +192,7 @@ export function materializeSplit(
       const branchRows = shuffled.slice(consumed, end);
       consumed = end;
       return { label: `Random ${formatPercent(percentage / total * 100)}%`, rowIndices: branchRows };
-    }).filter((branch) => branch.rowIndices.length > 0);
+    });
   }
   if (split.kind === "percentile") {
     const position = dataset.columns.indexOf(split.feature);
@@ -189,16 +200,19 @@ export function materializeSplit(
       .map((rowIndex) => ({ rowIndex, value: asNumber(dataset.rows[rowIndex]?.[position], dataset, split.feature) }))
       .filter((item): item is { rowIndex: number; value: number } => item.value !== null)
       .sort((left, right) => left.value - right.value || left.rowIndex - right.rowIndex);
-    if (numericRows.length < split.buckets) throw new Error("There are not enough numeric values for these percentile groups.");
-    const branches = Array.from({ length: split.buckets }, (_, index) => {
-      const start = Math.round(numericRows.length * index / split.buckets);
-      const end = Math.round(numericRows.length * (index + 1) / split.buckets);
+    const cutpoints = split.cutpoints?.length
+      ? [...new Set(split.cutpoints.filter((value) => Number.isFinite(value) && value > 0 && value < 1))].sort((left, right) => left - right)
+      : Array.from({ length: split.buckets - 1 }, (_, index) => (index + 1) / split.buckets);
+    const boundaries = [0, ...cutpoints, 1];
+    const branches = Array.from({ length: boundaries.length - 1 }, (_, index) => {
+      const start = Math.round(numericRows.length * boundaries[index]);
+      const end = Math.round(numericRows.length * boundaries[index + 1]);
       const values = numericRows.slice(start, end);
       return {
-        label: `P${Math.round(index * 100 / split.buckets)}–P${Math.round((index + 1) * 100 / split.buckets)}`,
+        label: `P${formatPercent(boundaries[index] * 100)}–P${formatPercent(boundaries[index + 1] * 100)}`,
         rowIndices: values.map((item) => item.rowIndex),
       };
-    }).filter((branch) => branch.rowIndices.length > 0);
+    });
     const numericSet = new Set(numericRows.map((item) => item.rowIndex));
     const missing = rowIndices.filter((rowIndex) => !numericSet.has(rowIndex));
     if (missing.length) branches[branches.length - 1].rowIndices.push(...missing);
@@ -212,6 +226,7 @@ export function materializeSplit(
       split.values,
       split.forceCategorical,
       split.includeOther,
+      split.missingDestination,
     );
   }
   const [matching, remaining] = splitRows(

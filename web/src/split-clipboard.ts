@@ -40,14 +40,21 @@ function parsedSplit(value: unknown): TreeSplitDefinition | undefined {
     return { kind: "random", percentages: split.percentages as number[], seed: Math.trunc(split.seed) };
   }
   if (typeof split.feature !== "string" || !split.feature) throw new Error("The copied split has no variable.");
-  if (split.kind === "percentile" && typeof split.buckets === "number" && Number.isInteger(split.buckets) && split.buckets >= 2 && split.buckets <= 10) {
-    return { kind: "percentile", feature: split.feature, buckets: split.buckets };
+  if (split.kind === "percentile" && typeof split.buckets === "number" && Number.isInteger(split.buckets) && split.buckets >= 2 && split.buckets <= 20) {
+    const cutpoints = Array.isArray(split.cutpoints) && split.cutpoints.length <= 19 && split.cutpoints.every((item) => typeof item === "number" && Number.isFinite(item) && item > 0 && item < 1)
+      ? [...new Set(split.cutpoints as number[])].sort((left, right) => left - right)
+      : undefined;
+    if (split.cutpoints !== undefined && !cutpoints?.length) throw new Error("The copied percentile split is invalid.");
+    return { kind: "percentile", feature: split.feature, buckets: cutpoints ? cutpoints.length + 1 : split.buckets, ...(cutpoints ? { cutpoints } : {}) };
   }
   if (split.kind === "binary" && (split.operator === "<=" || split.operator === "==") && isPrimitive(split.value)) {
     return { kind: "binary", feature: split.feature, operator: split.operator, value: split.value };
   }
   if (split.kind === "manual" && Array.isArray(split.values) && split.values.length && split.values.every(isPrimitive)) {
-    return { kind: "manual", feature: split.feature, values: split.values, forceCategorical: split.forceCategorical === true, includeOther: split.includeOther !== false };
+    const missingDestination = split.missingDestination === "other" || split.missingDestination === "exclude" || typeof split.missingDestination === "number" && Number.isInteger(split.missingDestination) && split.missingDestination >= 0
+      ? split.missingDestination as number | "other" | "exclude"
+      : undefined;
+    return { kind: "manual", feature: split.feature, values: split.values, forceCategorical: split.forceCategorical === true, includeOther: split.includeOther !== false, ...(missingDestination !== undefined ? { missingDestination } : {}) };
   }
   throw new Error("The copied split is invalid.");
 }
@@ -101,10 +108,13 @@ export async function readSplitsFromClipboard(): Promise<SplitClipboardPayload> 
 function materializeCopiedNode(dataset: ParsedDataset, copied: ClipboardNode, rowIndices: number[], id: string, title: string, branchLabel?: string): TreeNode {
   const base: TreeNode = { id, title, samples: rowIndices.length, rowIndices, ...(branchLabel ? { branchLabel } : {}), children: [] };
   if (!copied.split) return base;
-  const branches = materializeSplit(dataset, rowIndices, copied.split);
-  if (branches.length !== copied.children.length || branches.some((branch) => branch.rowIndices.length === 0)) {
-    throw new Error(`The copied ${copied.split.kind === "random" ? "random split" : `split on “${copied.split.feature}”`} does not produce the same branches in this node.`);
+  let branches;
+  try {
+    branches = materializeSplit(dataset, rowIndices, copied.split);
+  } catch {
+    return base;
   }
+  if (branches.length !== copied.children.length) return base;
   return {
     ...base,
     split: copied.split,

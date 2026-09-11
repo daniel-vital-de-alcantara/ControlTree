@@ -79,9 +79,16 @@ describe("private browser calculation engine", () => {
       "<=30",
       "(30, 50]",
       ">50",
-      "Other / missing",
+      "Missing",
     ]);
     expect(split.branches.map((branch) => branch.count)).toEqual([2, 2, 1, 1]);
+  });
+
+  it("can route missing values into a chosen manual branch", async () => {
+    const dataset = normalizeTable([["age"], [18], [45], [null]], "ages.csv");
+    const split = await requestManualSplit(dataset, [0, 1, 2], "age", [30], false, true, 1);
+    expect(split.branches.map((branch) => branch.label)).toEqual(["<=30", ">30 + missing"]);
+    expect(split.branches.map((branch) => branch.count)).toEqual([1, 2]);
   });
 
   it("replays a saved tree entirely in the browser", async () => {

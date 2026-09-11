@@ -38,4 +38,11 @@ describe("tree quality tests", () => {
     const constant = { ...dataset, rows: dataset.rows.map((row) => [row[0], 1]) };
     expect(evaluateTree(constant, tree, "amount").score).toBeNull();
   });
+
+  it("ignores empty branches in quality calculations", () => {
+    const withEmpty = { ...tree, children: [...tree.children, { id: "root.3", title: "Empty", samples: 0, rowIndices: [], children: [] }] };
+    const result = evaluateTree(dataset, withEmpty, "amount");
+    expect(result.splits[0].childCount).toBe(2);
+    expect(result.leafCount).toBe(2);
+  });
 });
